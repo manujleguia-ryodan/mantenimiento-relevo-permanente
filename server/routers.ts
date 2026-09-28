@@ -84,6 +84,20 @@ export function insertId(result: unknown) {
   return id;
 }
 
+export function buildGuardAssignmentRows(
+  weekId: number,
+  guard: "A" | "B" | "C" | "D",
+  equipmentIds: number[],
+  selectedById: number
+) {
+  return Array.from(new Set(equipmentIds)).map(equipmentId => ({
+    weekId,
+    guard,
+    equipmentId,
+    selectedById,
+  }));
+}
+
 // Roles funcionales aprobados: admin = Facilitador; user = Supervisor.
 const facilitatorProcedure = adminProcedure;
 
@@ -170,6 +184,7 @@ export const appRouter = router({
           label: z.string().min(1).max(32),
           weekNumber: z.number().int().min(1).max(53),
           year: z.number().int().min(2020).max(2200),
+          guard: guardSchema,
           sourceFileName: z.string().max(255).optional(),
           rows: z
             .array(
@@ -212,6 +227,7 @@ export const appRouter = router({
         });
         const weekId = insertId(weekInsert);
         const equipmentCache = new Map<string, number>();
+        const importedEquipmentIds: number[] = [];
         const seenOt = new Set<string>();
         let duplicateCount = 0;
         let equipmentCount = 0;
@@ -245,6 +261,7 @@ export const appRouter = router({
             }
             equipmentCache.set(equipmentCode, equipmentId);
           }
+          importedEquipmentIds.push(equipmentId);
 
           await db.insert(workOrders).values({
             weekId,
@@ -255,6 +272,15 @@ export const appRouter = router({
           });
           otCount += 1;
         }
+
+        await db.insert(guardAssignments).values(
+          buildGuardAssignmentRows(
+            weekId,
+            input.guard,
+            importedEquipmentIds,
+            ctx.user.id
+          )
+        );
 
         return { weekId, otCount, equipmentCount, duplicateCount };
       }),

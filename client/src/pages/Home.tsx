@@ -508,6 +508,7 @@ export default function Home() {
       label: `SEM ${weekNumber}`,
       weekNumber,
       year,
+      guard,
       sourceFileName: importPreview.fileName,
       rows: importPreview.rows,
     });
