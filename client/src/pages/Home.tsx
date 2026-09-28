@@ -214,6 +214,7 @@ export default function Home() {
   const assignedGuard = ((user as (typeof user & { guard?: Guard }) | null)?.guard) ?? "A";
   const isAdmin = user?.role === "admin";
   const isFacilitator = isAdmin || user?.role === "facilitator";
+  const canCloseOt = isAdmin || user?.role === "supervisor";
   const isViewer = user?.role === "viewer";
   const roleLabel = isAdmin
     ? "Administrador"
@@ -1464,10 +1465,17 @@ export default function Home() {
                           );
                           const requiresLogistics =
                             row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
+                          const rowTone = row.execution?.status === "CERRADA_NOTIFICADA"
+                            ? "bg-blue-500/[0.12] hover:bg-blue-500/[0.18]"
+                            : state === "RECIBIDA"
+                              ? "bg-emerald-400/[0.10] hover:bg-emerald-400/[0.16]"
+                              : state === "PARCIAL" || state === "FALTA_RECIBIR"
+                                ? "bg-orange-400/[0.10] hover:bg-orange-400/[0.16]"
+                                : "hover:bg-white/[0.025]";
                           return (
                             <tr
                               key={row.workOrder.id}
-                              className="group transition hover:bg-white/[0.025]"
+                              className={`group border-l-2 transition ${rowTone} ${row.execution?.status === "CERRADA_NOTIFICADA" ? "border-l-blue-400" : state === "RECIBIDA" ? "border-l-emerald-400" : state === "PARCIAL" || state === "FALTA_RECIBIR" ? "border-l-orange-400" : "border-l-transparent"}`}
                             >
                               <td className="whitespace-nowrap px-4 py-2.5 font-mono text-sm font-semibold text-white">
                                 {row.workOrder.otNumber}
@@ -1516,7 +1524,7 @@ export default function Home() {
                                 {formatDate(row.state?.updatedAt)}
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                                {!isViewer && selectedWeekId && (
+                                {canCloseOt && selectedWeekId && (
                                   <button
                                     onClick={() =>
                                       executionMutation.mutate({

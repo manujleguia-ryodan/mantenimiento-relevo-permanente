@@ -37,7 +37,7 @@ function createContext(cookieHeader = "", ip = `pin-test-${Math.random()}`) {
   return { ctx: { req, res, user: null } as TrpcContext, writtenCookies };
 }
 
-function createRoleContext(role: "supervisor" | "viewer") {
+function createRoleContext(role: "facilitator" | "supervisor" | "viewer") {
   const { ctx } = createContext();
   ctx.user = {
     id: 91,
@@ -193,4 +193,16 @@ describe("shared PIN access", () => {
       }
     }
   );
+
+  it("rejects OT closure for Facilitator while allowing the role to remain operational", async () => {
+    const caller = appRouter.createCaller(createRoleContext("facilitator"));
+    await expect(
+      caller.maintenance.markOperationalExecution({
+        workOrderId: 1,
+        weekId: 1,
+        guard: "A",
+        closed: true,
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

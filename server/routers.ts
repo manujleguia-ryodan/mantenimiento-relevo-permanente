@@ -95,10 +95,10 @@ const facilitatorProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
 });
 
 const operationalProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role === "viewer")
+  if (ctx.user.role !== "admin" && ctx.user.role !== "supervisor")
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "El perfil Visualizador no puede modificar OTs.",
+      message: "Solo el Supervisor o Administrador puede cerrar o reabrir OTs.",
     });
   return next({ ctx });
 });
