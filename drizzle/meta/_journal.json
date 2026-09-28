@@ -1,5 +1,27 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1790548674652,
+      "tag": "0000_lethal_stryfe",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1790548876684,
+      "tag": "0001_maintenance_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1790604534314,
+      "tag": "0002_typical_purifiers",
+      "breakpoints": true
+    }
+  ]
 }

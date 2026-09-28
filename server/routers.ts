@@ -1,28 +1,427 @@
+import { TRPCError } from "@trpc/server";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
+import {
+  equipment,
+  guardAssignments,
+  guardRelations,
+  handoverItems,
+  handovers,
+  maintenanceWeeks,
+  otHistory,
+  otStatePendingWarehouses,
+  otStates,
+  warehouses,
+  workOrders,
+} from "../drizzle/schema";
+import {
+  getDashboardData,
+  getDb,
+  getEquipment,
+  getGuardRelations,
+  getLatestHandover,
+  getOtHistory,
+  getWarehouses,
+  getWeeks,
+  requireDb,
+} from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
+import {
+  validateReceptionInput,
+} from "@shared/maintenance";
+import {
+  canAttemptSharedPin,
+  clearFailedSharedPinAttempts,
+  createSharedAccessToken,
+  createSharedAccessUser,
+  getConfiguredSharedPin,
+  hasSharedAccess,
+  matchesSharedPin,
+  recordFailedSharedPinAttempt,
+  SHARED_ACCESS_COOKIE,
+  SHARED_ACCESS_TTL_MS,
+  SHARED_PIN_MIN_LENGTH,
+} from "./sharedAccess";
+
+const guardSchema = z.enum(["A", "B", "C", "D"]);
+const statusSchema = z.enum([
+  "SIN_REVISAR",
+  "RECIBIDA",
+  "PARCIAL",
+  "FALTA_RECIBIR",
+]);
+
+const sharedAccessProcedure = publicProcedure.use(({ ctx, next }) => {
+  const user =
+    ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser() : null);
+  if (!user)
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Ingresa el PIN compartido para continuar.",
+    });
+  return next({ ctx: { ...ctx, user } });
+});
+
+const adminProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin")
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Se requiere perfil administrador",
+    });
+  return next({ ctx });
+});
+
+function insertId(result: unknown) {
+  return Number((result as { insertId?: number }).insertId ?? 0);
+}
+
+// Roles funcionales aprobados: admin = Facilitador; user = Supervisor.
+const facilitatorProcedure = adminProcedure;
+
+function uniqueCodes(codes: string[]) {
+  return Array.from(new Set(codes.map(code => code.trim().toUpperCase()).filter(Boolean)));
+}
 
 export const appRouter = router({
-    // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(
+      ({ ctx }) =>
+        ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser() : null)
+    ),
+    pinLogin: publicProcedure
+      .input(z.object({ pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
+      .mutation(({ ctx, input }) => {
+        const configuredPin = getConfiguredSharedPin();
+        const signingSecret = process.env.JWT_SECRET;
+        if (!configuredPin || !signingSecret) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "El acceso por PIN aún no está configurado. Contacta al administrador del sitio.",
+          });
+        }
+
+        const ip = ctx.req.ip || ctx.req.socket.remoteAddress || "unknown";
+        if (!canAttemptSharedPin(ip)) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message:
+              "Demasiados intentos. Espera 15 minutos antes de volver a probar.",
+          });
+        }
+        if (!matchesSharedPin(input.pin, configuredPin)) {
+          recordFailedSharedPinAttempt(ip);
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "PIN incorrecto.",
+          });
+        }
+
+        clearFailedSharedPinAttempts(ip);
+        ctx.res.cookie(
+          SHARED_ACCESS_COOKIE,
+          createSharedAccessToken(signingSecret),
+          {
+            ...getSessionCookieOptions(ctx.req),
+            sameSite: "lax",
+            maxAge: SHARED_ACCESS_TTL_MS,
+          }
+        );
+        return createSharedAccessUser();
+      }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
+      ctx.res.clearCookie(SHARED_ACCESS_COOKIE, {
+        ...cookieOptions,
+        sameSite: "lax",
+        maxAge: -1,
+      });
+      return { success: true } as const;
     }),
   }),
+  maintenance: router({
+    bootstrap: sharedAccessProcedure.query(async () => ({
+      weeks: await getWeeks(),
+      equipment: await getEquipment(),
+      warehouses: await getWarehouses(),
+      relations: await getGuardRelations(),
+    })),
 
-  // TODO: add feature routers here, e.g.
-  // todo: router({
-  //   list: protectedProcedure.query(({ ctx }) =>
-  //     db.getUserTodos(ctx.user.id)
-  //   ),
-  // }),
+    dashboard: sharedAccessProcedure
+      .input(
+        z.object({ weekId: z.number().int().positive(), guard: guardSchema })
+      )
+      .query(({ input }) => getDashboardData(input.weekId, input.guard)),
+
+    importWeek: adminProcedure
+      .input(
+        z.object({
+          label: z.string().min(1).max(32),
+          weekNumber: z.number().int().min(1).max(53),
+          year: z.number().int().min(2020).max(2200),
+          sourceFileName: z.string().max(255).optional(),
+          rows: z
+            .array(
+              z.object({
+                otNumber: z.string().min(1).max(80),
+                equipmentCode: z.string().min(1).max(80),
+                equipmentDescription: z.string().max(255).optional(),
+                description: z.string().max(10000).optional(),
+                extra: z.record(z.string(), z.string()).optional(),
+              })
+            )
+            .min(1),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const [already] = await db
+          .select()
+          .from(maintenanceWeeks)
+          .where(
+            and(
+              eq(maintenanceWeeks.year, input.year),
+              eq(maintenanceWeeks.weekNumber, input.weekNumber)
+            )
+          )
+          .limit(1);
+        if (already)
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "La semana ya fue importada. Usa otra semana o archiva la importación anterior.",
+          });
+
+        const weekInsert = await db.insert(maintenanceWeeks).values({
+          label: input.label,
+          weekNumber: input.weekNumber,
+          year: input.year,
+          sourceFileName: input.sourceFileName,
+          importedById: ctx.user.id,
+        });
+        const weekId = insertId(weekInsert);
+        const equipmentCache = new Map<string, number>();
+        const seenOt = new Set<string>();
+        let duplicateCount = 0;
+        let equipmentCount = 0;
+        let otCount = 0;
+
+        for (const row of input.rows) {
+          const otNumber = row.otNumber.trim();
+          const equipmentCode = row.equipmentCode.trim().toUpperCase();
+          if (seenOt.has(otNumber)) {
+            duplicateCount += 1;
+            continue;
+          }
+          seenOt.add(otNumber);
+
+          let equipmentId = equipmentCache.get(equipmentCode);
+          if (!equipmentId) {
+            const [existingEquipment] = await db
+              .select()
+              .from(equipment)
+              .where(eq(equipment.code, equipmentCode))
+              .limit(1);
+            if (existingEquipment) {
+              equipmentId = existingEquipment.id;
+            } else {
+              const equipmentInsert = await db.insert(equipment).values({
+                code: equipmentCode,
+                description: row.equipmentDescription || null,
+              });
+              equipmentId = insertId(equipmentInsert);
+              equipmentCount += 1;
+            }
+            equipmentCache.set(equipmentCode, equipmentId);
+          }
+
+          await db.insert(workOrders).values({
+            weekId,
+            otNumber,
+            equipmentId,
+            description: row.description || null,
+            sourceData: row.extra ? JSON.stringify(row.extra) : null,
+          });
+          otCount += 1;
+        }
+
+        return { weekId, otCount, equipmentCount, duplicateCount };
+      }),
+
+    saveAssignments: sharedAccessProcedure
+      .input(
+        z.object({
+          weekId: z.number().int().positive(),
+          guard: guardSchema,
+          equipmentIds: z.array(z.number().int().positive()),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        await db
+          .delete(guardAssignments)
+          .where(
+            and(
+              eq(guardAssignments.weekId, input.weekId),
+              eq(guardAssignments.guard, input.guard)
+            )
+          );
+        if (input.equipmentIds.length) {
+          await db.insert(guardAssignments).values(
+            input.equipmentIds.map(equipmentId => ({
+              weekId: input.weekId,
+              guard: input.guard,
+              equipmentId,
+              selectedById: ctx.user.id,
+            }))
+          );
+        }
+        return getDashboardData(input.weekId, input.guard);
+      }),
+
+    updateReception: facilitatorProcedure
+      .input(
+        z.object({
+          workOrderId: z.number().int().positive(),
+          weekId: z.number().int().positive(),
+          guard: guardSchema,
+          status: statusSchema,
+          warehouseCodes: z.array(z.string().min(1).max(64)).default([]),
+          responsibleName: z.string().max(160).optional(),
+          note: z.string().max(10000).optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const warehouseCodes = uniqueCodes(input.warehouseCodes);
+        const validationMessage = validateReceptionInput(input.status, warehouseCodes);
+        if (validationMessage) throw new TRPCError({ code: "BAD_REQUEST", message: validationMessage });
+        const selectedWarehouses = warehouseCodes.length
+          ? await db.select().from(warehouses).where(and(inArray(warehouses.code, warehouseCodes), eq(warehouses.active, true)))
+          : [];
+        if (selectedWarehouses.length !== warehouseCodes.length)
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Uno o más almacenes no están en el catálogo activo." });
+        const [existing] = await db.select().from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard))).limit(1);
+        const responsibleName = input.responsibleName?.trim() || ctx.user.name || ctx.user.email || "Usuario actual";
+        const newPendingWarehouse = warehouseCodes.join(", ") || null;
+        let stateId: number;
+        await db.transaction(async tx => {
+          if (existing) {
+            stateId = existing.id;
+            await tx.update(otStates).set({ status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, note: input.note?.trim() || null, updatedById: ctx.user.id, updatedAt: new Date() }).where(eq(otStates.id, existing.id));
+            await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, existing.id));
+          } else {
+            const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, note: input.note?.trim() || null, updatedById: ctx.user.id });
+            stateId = insertId(inserted);
+          }
+          if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
+          await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: existing?.status || null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user.id, actorName: ctx.user.name || ctx.user.email || "Usuario actual" });
+        });
+        return { success: true, stateId: stateId! };
+      }),
+
+    history: sharedAccessProcedure
+      .input(z.object({ workOrderId: z.number().int().positive() }))
+      .query(({ input }) => getOtHistory(input.workOrderId)),
+
+    generateHandover: facilitatorProcedure
+      .input(z.object({ weekId: z.number().int().positive(), fromGuard: guardSchema, toGuard: guardSchema }))
+      .mutation(async ({ input, ctx }) => {
+        if (input.fromGuard === input.toGuard) throw new TRPCError({ code: "BAD_REQUEST", message: "La guardia que entrega y recibe deben ser diferentes." });
+        const db = await requireDb();
+        const dashboard = await getDashboardData(input.weekId, input.fromGuard);
+        const pendingRows = dashboard.rows.filter(row => row.state && (row.state.status === "PARCIAL" || row.state.status === "FALTA_RECIBIR"));
+        return db.transaction(async tx => {
+          const [already] = await tx.select().from(handovers).where(and(eq(handovers.weekId, input.weekId), eq(handovers.fromGuard, input.fromGuard), eq(handovers.toGuard, input.toGuard), inArray(handovers.status, ["ENVIADO", "CONFIRMADO"]))).limit(1);
+          if (already) throw new TRPCError({ code: "CONFLICT", message: "Este relevo ya fue generado o confirmado." });
+          const inserted = await tx.insert(handovers).values({ weekId: input.weekId, fromGuard: input.fromGuard, toGuard: input.toGuard, status: "ENVIADO", createdById: ctx.user.id });
+          const handoverId = insertId(inserted);
+          for (const row of pendingRows) {
+            const state = row.state!;
+            const pendingWarehouses = row.pendingWarehouses.map(item => ({ code: item.warehouseCodeSnapshot, name: item.warehouseNameSnapshot }));
+            await tx.insert(handoverItems).values({ handoverId, otStateId: state.id, workOrderId: row.workOrder.id, statusSnapshot: state.status, pendingWarehousesSnapshot: JSON.stringify(pendingWarehouses), fromGuardSnapshot: input.fromGuard, toGuardSnapshot: input.toGuard, createdByIdSnapshot: ctx.user.id, createdAtSnapshot: new Date() });
+            const [incoming] = await tx.select().from(otStates).where(and(eq(otStates.workOrderId, row.workOrder.id), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.toGuard))).limit(1);
+            let incomingId = incoming?.id;
+            if (incoming) await tx.update(otStates).set({ status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user.id, updatedAt: new Date() }).where(eq(otStates.id, incoming.id));
+            else { const created = await tx.insert(otStates).values({ workOrderId: row.workOrder.id, weekId: input.weekId, guard: input.toGuard, status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user.id }); incomingId = insertId(created); }
+            await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, incomingId!));
+            if (row.pendingWarehouses.length) await tx.insert(otStatePendingWarehouses).values(row.pendingWarehouses.map(item => ({ otStateId: incomingId!, warehouseId: item.warehouseId, warehouseCodeSnapshot: item.warehouseCodeSnapshot, warehouseNameSnapshot: item.warehouseNameSnapshot })));
+            const [assignment] = await tx.select().from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.toGuard), eq(guardAssignments.equipmentId, row.workOrder.equipmentId))).limit(1);
+            if (!assignment) await tx.insert(guardAssignments).values({ weekId: input.weekId, guard: input.toGuard, equipmentId: row.workOrder.equipmentId, selectedById: ctx.user.id });
+          }
+          return { handoverId, pendingCount: pendingRows.length };
+        });
+      }),
+
+    latestHandover: sharedAccessProcedure
+      .input(
+        z.object({
+          weekId: z.number().int().positive(),
+          fromGuard: guardSchema,
+          toGuard: guardSchema,
+        })
+      )
+      .query(({ input }) =>
+        getLatestHandover(input.weekId, input.fromGuard, input.toGuard)
+      ),
+
+    confirmHandover: facilitatorProcedure
+      .input(z.object({ handoverId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        await db
+          .update(handovers)
+          .set({
+            status: "CONFIRMADO",
+            confirmedById: ctx.user.id,
+            confirmedAt: new Date(),
+          })
+          .where(eq(handovers.id, input.handoverId));
+        return { success: true };
+      }),
+
+    saveRelations: adminProcedure
+      .input(
+        z.object({
+          relations: z.array(
+            z.object({ fromGuard: guardSchema, toGuard: guardSchema })
+          ),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        for (const relation of input.relations) {
+          if (relation.fromGuard === relation.toGuard) continue;
+          const [existing] = await db
+            .select()
+            .from(guardRelations)
+            .where(eq(guardRelations.fromGuard, relation.fromGuard))
+            .limit(1);
+          if (existing) {
+            await db
+              .update(guardRelations)
+              .set({
+                toGuard: relation.toGuard,
+                updatedById: ctx.user.id,
+                updatedAt: new Date(),
+              })
+              .where(eq(guardRelations.id, existing.id));
+          } else {
+            await db.insert(guardRelations).values({
+              fromGuard: relation.fromGuard,
+              toGuard: relation.toGuard,
+              updatedById: ctx.user.id,
+            });
+          }
+        }
+        return getGuardRelations();
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

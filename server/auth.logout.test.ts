@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import { COOKIE_NAME } from "../shared/const";
+import { SHARED_ACCESS_COOKIE } from "./sharedAccess";
 import type { TrpcContext } from "./_core/context";
 
 type CookieCall = {
@@ -10,7 +11,10 @@ type CookieCall = {
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
-function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] } {
+function createAuthContext(): {
+  ctx: TrpcContext;
+  clearedCookies: CookieCall[];
+} {
   const clearedCookies: CookieCall[] = [];
 
   const user: AuthenticatedUser = {
@@ -49,12 +53,20 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(1);
+    expect(clearedCookies).toHaveLength(2);
     expect(clearedCookies[0]?.name).toBe(COOKIE_NAME);
     expect(clearedCookies[0]?.options).toMatchObject({
       maxAge: -1,
       secure: true,
       sameSite: "none",
+      httpOnly: true,
+      path: "/",
+    });
+    expect(clearedCookies[1]?.name).toBe(SHARED_ACCESS_COOKIE);
+    expect(clearedCookies[1]?.options).toMatchObject({
+      maxAge: -1,
+      secure: true,
+      sameSite: "lax",
       httpOnly: true,
       path: "/",
     });
