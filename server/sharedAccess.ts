@@ -36,9 +36,12 @@ function signature(payload: string, secret: string) {
 export function createSharedAccessToken(
   secret: string,
   expiresAt = Date.now() + SHARED_ACCESS_TTL_MS,
-  role: SharedAccessRole = "admin"
+  role: SharedAccessRole = "admin",
+  guard: SharedAccessGuard = "A",
+  name = "Acceso compartido"
 ) {
-  const payload = `${expiresAt}|${role}`;
+  const encodedName = Buffer.from(name, "utf8").toString("base64url");
+  const payload = `${expiresAt}|${role}|${guard}|${encodedName}`;
   return `${payload}.${signature(payload, secret)}`;
 }
 
@@ -89,22 +92,57 @@ export function getSharedAccessRole(
   return role === "facilitator" || role === "supervisor" ? role : "admin";
 }
 
+export function getSharedAccessGuard(
+  req: Pick<Request, "headers">
+): SharedAccessGuard {
+  const rawCookieHeader = req.headers.cookie;
+  const cookieHeader = Array.isArray(rawCookieHeader)
+    ? rawCookieHeader.join(";")
+    : (rawCookieHeader ?? "");
+  const token = parseCookie(cookieHeader)[SHARED_ACCESS_COOKIE];
+  if (!token || !verifySharedAccessToken(token, process.env.JWT_SECRET)) return "A";
+  const payload = token.slice(0, token.lastIndexOf("."));
+  const guard = payload.split("|")[2];
+  return guard === "B" || guard === "C" || guard === "D" ? guard : "A";
+}
+
+export function getSharedAccessName(req: Pick<Request, "headers">) {
+  const rawCookieHeader = req.headers.cookie;
+  const cookieHeader = Array.isArray(rawCookieHeader)
+    ? rawCookieHeader.join(";")
+    : (rawCookieHeader ?? "");
+  const token = parseCookie(cookieHeader)[SHARED_ACCESS_COOKIE];
+  if (!token || !verifySharedAccessToken(token, process.env.JWT_SECRET)) return "Acceso compartido";
+  const payload = token.slice(0, token.lastIndexOf("."));
+  try {
+    const encodedName = payload.split("|")[3];
+    if (!encodedName) return "Acceso compartido";
+    return Buffer.from(encodedName, "base64url").toString("utf8") || "Acceso compartido";
+  } catch {
+    return "Acceso compartido";
+  }
+}
+
 export type SharedAccessRole = "admin" | "facilitator" | "supervisor";
+export type SharedAccessGuard = "A" | "B" | "C" | "D";
 
 export function createSharedAccessUser(
   role: SharedAccessRole = "admin",
-  now = new Date()
-): User {
+  now = new Date(),
+  guard: SharedAccessGuard = "A",
+  name = "Acceso compartido"
+): User & { guard: SharedAccessGuard } {
   return {
     id: 0,
     openId: "shared-pin-access",
-    name: "Acceso compartido",
+    name,
     email: null,
     loginMethod: "shared-pin",
     role,
     createdAt: now,
     updatedAt: now,
     lastSignedIn: now,
+    guard,
   };
 }
 

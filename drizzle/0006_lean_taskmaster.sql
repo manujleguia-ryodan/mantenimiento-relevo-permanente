@@ -1,0 +1,1 @@
+ALTER TABLE `accessCodes` ADD `guard` enum('A','B','C','D') DEFAULT 'A' NOT NULL;

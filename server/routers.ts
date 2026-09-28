@@ -43,6 +43,8 @@ import {
   createSharedAccessToken,
   createSharedAccessUser,
   getConfiguredSharedPin,
+  getSharedAccessGuard,
+  getSharedAccessName,
   getSharedAccessRole,
   hashAccessCode,
   hasSharedAccess,
@@ -65,7 +67,7 @@ const managedRoleSchema = z.enum(["admin", "facilitator", "supervisor", "viewer"
 
 const sharedAccessProcedure = publicProcedure.use(({ ctx, next }) => {
   const user =
-    ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req)) : null);
+    ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req), new Date(), getSharedAccessGuard(ctx.req), getSharedAccessName(ctx.req)) : null);
   if (!user)
     throw new TRPCError({
       code: "UNAUTHORIZED",
@@ -138,7 +140,7 @@ export const appRouter = router({
   auth: router({
     me: publicProcedure.query(
       ({ ctx }) =>
-        ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req)) : null)
+        ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req), new Date(), getSharedAccessGuard(ctx.req), getSharedAccessName(ctx.req)) : null)
     ),
     pinLogin: publicProcedure
       .input(z.object({ pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
@@ -163,12 +165,16 @@ export const appRouter = router({
         }
         let accessRole: "admin" | "facilitator" | "supervisor" | null =
           matchesSharedPin(input.pin, configuredPin) ? "admin" : null;
+        let accessGuard: "A" | "B" | "C" | "D" = "A";
+        let accessName = "Acceso compartido";
         const db = await getDb();
         if (!accessRole && db) {
           const codes = await db.select().from(accessCodes).where(eq(accessCodes.active, true));
           const matched = codes.find(code => matchesAccessCode(input.pin, code.salt, code.codeHash));
           if (matched) {
             accessRole = matched.role;
+            accessGuard = matched.guard;
+            accessName = matched.label;
             await db.update(accessCodes).set({ lastUsedAt: new Date() }).where(eq(accessCodes.id, matched.id));
           }
         }
@@ -183,7 +189,9 @@ export const appRouter = router({
           createSharedAccessToken(
             signingSecret,
             Date.now() + SHARED_ACCESS_TTL_MS,
-            accessRole
+            accessRole,
+            accessGuard,
+            accessName
           ),
           {
             ...getSessionCookieOptions(ctx.req),
@@ -568,17 +576,17 @@ export const appRouter = router({
     listAccessCodes: adminProcedure.query(async () => {
       const db = await requireDb();
       return db
-        .select({ id: accessCodes.id, label: accessCodes.label, role: accessCodes.role, active: accessCodes.active, createdAt: accessCodes.createdAt, lastUsedAt: accessCodes.lastUsedAt })
+        .select({ id: accessCodes.id, label: accessCodes.label, role: accessCodes.role, guard: accessCodes.guard, active: accessCodes.active, createdAt: accessCodes.createdAt, lastUsedAt: accessCodes.lastUsedAt })
         .from(accessCodes)
         .orderBy(desc(accessCodes.createdAt));
     }),
 
     createAccessCode: adminProcedure
-      .input(z.object({ label: z.string().trim().min(2).max(120), role: z.enum(["facilitator", "supervisor"]), pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
+      .input(z.object({ label: z.string().trim().min(2).max(120), role: z.enum(["facilitator", "supervisor"]), guard: guardSchema, pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
         const { salt, hash } = hashAccessCode(input.pin);
-        const inserted = await db.insert(accessCodes).values({ label: input.label, role: input.role, salt, codeHash: hash, createdById: ctx.user.id });
+        const inserted = await db.insert(accessCodes).values({ label: input.label, role: input.role, guard: input.guard, salt, codeHash: hash, createdById: ctx.user.id });
         return { success: true, id: insertId(inserted) };
       }),
 
@@ -587,6 +595,14 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const db = await requireDb();
         await db.update(accessCodes).set({ active: false }).where(eq(accessCodes.id, input.id));
+        return { success: true };
+      }),
+
+    updateAccessCodeGuard: adminProcedure
+      .input(z.object({ id: z.number().int().positive(), guard: guardSchema }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        await db.update(accessCodes).set({ guard: input.guard }).where(eq(accessCodes.id, input.id));
         return { success: true };
       }),
 

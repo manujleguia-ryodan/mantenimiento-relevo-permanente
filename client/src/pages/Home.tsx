@@ -51,6 +51,7 @@ type Guard = "A" | "B" | "C" | "D";
 type Status = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RECIBIR";
 
 const GUARDS: Guard[] = ["A", "B", "C", "D"];
+const GUARD_LABEL: Record<Guard, string> = { A: "1", B: "2", C: "3", D: "4" };
 const STATUS_META: Record<
   Status,
   { label: string; tone: string; dot: string }
@@ -172,15 +173,17 @@ function KpiCard({
   detail,
   color,
   icon: Icon,
+  onClick,
 }: {
   label: string;
   value: string | number;
   detail?: string;
   color: string;
   icon: typeof PackageCheck;
+  onClick?: () => void;
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#141d1f] p-4 shadow-[0_12px_35px_rgba(0,0,0,0.16)] transition duration-200 hover:-translate-y-0.5 hover:border-white/[0.14]">
+    <button type="button" onClick={onClick} className="group relative w-full overflow-hidden rounded-2xl border border-white/[0.07] bg-[#141d1f] p-4 text-left shadow-[0_12px_35px_rgba(0,0,0,0.16)] transition duration-200 hover:-translate-y-0.5 hover:border-white/[0.14]">
       <div
         className={`absolute -right-8 -top-8 h-24 w-24 rounded-full blur-2xl ${color} opacity-20`}
       />
@@ -202,12 +205,13 @@ function KpiCard({
           <Icon className="h-4 w-4" />
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
 export default function Home() {
   const { user, loading: authLoading, isAuthenticated, logout } = useAuth();
+  const assignedGuard = ((user as (typeof user & { guard?: Guard }) | null)?.guard) ?? "A";
   const isAdmin = user?.role === "admin";
   const isFacilitator = isAdmin || user?.role === "facilitator";
   const isViewer = user?.role === "viewer";
@@ -228,6 +232,7 @@ export default function Home() {
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showRelations, setShowRelations] = useState(false);
   const [showAccessManagement, setShowAccessManagement] = useState(false);
@@ -244,6 +249,7 @@ export default function Home() {
   const [newAccessPin, setNewAccessPin] = useState("");
   const [showNewAccessPin, setShowNewAccessPin] = useState(false);
   const [newAccessRole, setNewAccessRole] = useState<"facilitator" | "supervisor">("supervisor");
+  const [newAccessGuard, setNewAccessGuard] = useState<Guard>("A");
   const [relationsDraft, setRelationsDraft] = useState<
     Record<Guard, Guard | "">
   >({ A: "", B: "", C: "", D: "" });
@@ -390,6 +396,13 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const updateAccessCodeGuardMutation = trpc.maintenance.updateAccessCodeGuard.useMutation({
+    onSuccess: () => {
+      toast.success("Guardia del usuario actualizada.");
+      void accessCodes.refetch();
+    },
+    onError: error => toast.error(error.message),
+  });
 
   const weeks = bootstrap.data?.weeks ?? [];
   const allEquipment =
@@ -439,6 +452,10 @@ export default function Home() {
     editingRow &&
       (editingRow.requiresLogistics ?? hasReservation(editingRow.workOrder.sourceData))
   );
+
+  useEffect(() => {
+    if (!isAdmin) setGuard(assignedGuard);
+  }, [assignedGuard, isAdmin]);
 
   useEffect(() => {
     if (!selectedWeekId && weeks[0]) setSelectedWeekId(weeks[0].id);
@@ -527,7 +544,7 @@ export default function Home() {
     setEditingRow(row);
     setStatusDraft((row.state?.status ?? "SIN_REVISAR") as Status);
     setWarehouseCodesDraft((row.pendingWarehouses ?? []).map((item: any) => item.warehouseCodeSnapshot));
-    setResponsibleDraft(row.state?.responsibleName ?? user?.name ?? "");
+    setResponsibleDraft(user?.name ?? "Usuario actual");
     setNoteDraft(row.state?.note ?? "");
     setShowHistory(false);
   }
@@ -785,7 +802,7 @@ export default function Home() {
                       Vista operacional
                     </div>
                     <div className="mt-1 font-display text-xl text-white">
-                      SEM 38 · GUARDIA A
+                      SEM 38 · GUARDIA 1
                     </div>
                   </div>
                   <div className="rounded-xl bg-emerald-400/10 p-2 text-emerald-300">
@@ -872,7 +889,7 @@ export default function Home() {
       </header>
       <div className="mx-auto flex max-w-[1560px]">
         <aside
-          className={`fixed inset-y-0 left-0 z-40 w-[270px] border-r border-white/[0.07] bg-[#0d1415] px-4 py-5 transition-transform lg:sticky lg:top-0 lg:block lg:h-screen lg:translate-x-0 ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}
+          className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/[0.07] bg-[#0d1415] px-4 py-5 transition-all lg:sticky lg:top-0 lg:block lg:h-screen lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[78px]" : "lg:w-[270px]"} ${mobileMenuOpen ? "translate-x-0 w-[270px]" : "-translate-x-full w-[270px]"}`}
         >
           <div className="flex items-center justify-between px-2">
             <div className="flex items-center gap-3">
@@ -893,6 +910,14 @@ export default function Home() {
               onClick={() => setMobileMenuOpen(false)}
             >
               <PanelLeftClose className="h-4 w-4" />
+            </button>
+            <button
+              className="hidden rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white lg:block"
+              onClick={() => setSidebarCollapsed(current => !current)}
+              aria-label={sidebarCollapsed ? "Mostrar panel lateral" : "Ocultar panel lateral"}
+              title={sidebarCollapsed ? "Mostrar panel lateral" : "Ocultar panel lateral"}
+            >
+              <PanelLeftClose className={`h-4 w-4 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`} />
             </button>
           </div>
           <div className="mt-10 px-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
@@ -957,7 +982,7 @@ export default function Home() {
                   {user?.name ?? "Usuario"}
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">
-                  {roleLabel}
+                  {roleLabel}{!isAdmin && ` · Guardia ${GUARD_LABEL[assignedGuard]}`}
                 </div>
               </div>
               <button
@@ -1038,13 +1063,13 @@ export default function Home() {
                     </select>
                   </div>
                   <div className="flex items-center gap-1 rounded-xl bg-white/[0.04] p-1">
-                    {GUARDS.map(item => (
+                    {GUARDS.filter(item => isAdmin || item === assignedGuard).map(item => (
                       <button
                         key={item}
                         onClick={() => setGuard(item)}
                         className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${guard === item ? "bg-amber-300 text-[#0a0f10]" : "text-slate-500 hover:text-white"}`}
                       >
-                        Guardia {item}
+                        Guardia {GUARD_LABEL[item]}
                       </button>
                     ))}
                   </div>
@@ -1052,7 +1077,7 @@ export default function Home() {
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <span>Guardia actual</span>
                   <span className="rounded-full border border-white/10 px-2 py-1 font-semibold text-slate-300">
-                    {guard}
+                    {GUARD_LABEL[guard]}
                   </span>
                   {selectedRelation && (
                     <>
@@ -1094,6 +1119,7 @@ export default function Home() {
                     detail={`${kpis.withoutReservation} sin reserva excluidas`}
                     color="bg-sky-400"
                     icon={ClipboardCheck}
+                    onClick={() => scrollTo("ot")}
                   />
                   <KpiCard
                     label="Recibidas"
@@ -1101,6 +1127,7 @@ export default function Home() {
                     detail={`${kpis.percent}% completas`}
                     color="bg-emerald-400"
                     icon={PackageCheck}
+                    onClick={() => { setStatusFilter("RECIBIDA"); scrollTo("ot"); }}
                   />
                   <KpiCard
                     label="Parciales"
@@ -1108,6 +1135,7 @@ export default function Home() {
                     detail="Requieren seguimiento"
                     color="bg-amber-400"
                     icon={AlertTriangle}
+                    onClick={() => { setStatusFilter("PARCIAL"); scrollTo("ot"); }}
                   />
                   <KpiCard
                     label="Falta recibir"
@@ -1115,6 +1143,7 @@ export default function Home() {
                     detail="Atención prioritaria"
                     color="bg-rose-400"
                     icon={BellRing}
+                    onClick={() => { setStatusFilter("FALTA_RECIBIR"); scrollTo("ot"); }}
                   />
                   <KpiCard
                     label="Recepción total"
@@ -1122,6 +1151,7 @@ export default function Home() {
                     detail="Solo OT completas"
                     color="bg-violet-400"
                     icon={BarChart3}
+                    onClick={() => scrollTo("ot")}
                   />
                 </section>
                 <section className="mt-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
@@ -1250,7 +1280,7 @@ export default function Home() {
                       </h2>
                       <p className="mt-1 text-sm text-slate-500">
                         Selecciona los equipos que deben aparecer en el panel de
-                        la Guardia {guard}.
+                        la Guardia {GUARD_LABEL[guard]}.
                       </p>
                     </div>
                     <div className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs text-amber-200">
@@ -1324,7 +1354,7 @@ export default function Home() {
 
                 <section
                   id="ot"
-                  className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-5"
+                  className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-4"
                 >
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                     <div>
@@ -1333,7 +1363,7 @@ export default function Home() {
                         operativo
                       </div>
                       <h2 className="mt-1 font-display text-2xl text-white">
-                        OT de la guardia {guard}
+                        OT de la guardia {GUARD_LABEL[guard]}
                       </h2>
                       <p className="mt-1 text-xs text-slate-500">
                         OT, equipo, reserva y descripción de operación.
@@ -1379,9 +1409,9 @@ export default function Home() {
                       </select>
                     </div>
                   </div>
-                  <div className="mt-5 overflow-x-auto rounded-xl border border-white/[0.06]">
+                  <div className="mt-4 max-h-[calc(100vh-360px)] min-h-[260px] overflow-auto rounded-xl border border-white/[0.06]">
                     <table className="w-full min-w-max text-left">
-                      <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-600">
+                      <thead className="sticky top-0 z-10 bg-[#162022] text-[10px] uppercase tracking-[0.15em] text-slate-600">
                         <tr>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
                             OT
@@ -1439,10 +1469,10 @@ export default function Home() {
                               key={row.workOrder.id}
                               className="group transition hover:bg-white/[0.025]"
                             >
-                              <td className="whitespace-nowrap px-4 py-4 font-mono text-sm font-semibold text-white">
+                              <td className="whitespace-nowrap px-4 py-2.5 font-mono text-sm font-semibold text-white">
                                 {row.workOrder.otNumber}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-4 text-sm text-amber-200/85">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-sm text-amber-200/85">
                                 {row.equipment?.code ?? "—"}
                               </td>
                               {excelColumns.map(column => {
@@ -1452,7 +1482,7 @@ export default function Home() {
                                 return (
                                   <td
                                     key={column}
-                                    className="max-w-[190px] px-3 py-4 text-xs text-slate-400"
+                                    className="max-w-[190px] px-3 py-2.5 text-xs text-slate-400"
                                   >
                                     <div className="truncate" title={value}>
                                       {value}
@@ -1460,7 +1490,7 @@ export default function Home() {
                                   </td>
                                 );
                               })}
-                              <td className="whitespace-nowrap px-4 py-4">
+                              <td className="whitespace-nowrap px-4 py-2.5">
                                 {requiresLogistics ? (
                                   <StatusPill status={state} />
                                 ) : (
@@ -1469,23 +1499,23 @@ export default function Home() {
                                   </span>
                                 )}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-400">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-400">
                                 {requiresLogistics ? (
                                   <>
                                     {pending}
-                                    {row.inheritedFrom && <div className="mt-1 text-[10px] text-amber-300">Pendiente heredado de Guardia {row.inheritedFrom}</div>}
+                                    {row.inheritedFrom && <div className="mt-1 text-[10px] text-amber-300">Pendiente heredado de Guardia {GUARD_LABEL[row.inheritedFrom as Guard]}</div>}
                                   </>
                                 ) : (
                                   "OT sin reserva (No requiere repuestos)"
                                 )}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-400">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-400">
                                 {row.state?.responsibleName || "—"}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-500">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-500">
                                 {formatDate(row.state?.updatedAt)}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-4 text-right">
+                              <td className="whitespace-nowrap px-4 py-2.5 text-right">
                                 {!isViewer && selectedWeekId && (
                                   <button
                                     onClick={() =>
@@ -1574,7 +1604,7 @@ export default function Home() {
                         Entrega
                       </div>
                       <div className="mt-1 font-display text-xl text-white">
-                        Guardia {guard}
+                        Guardia {GUARD_LABEL[guard]}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
@@ -1582,7 +1612,7 @@ export default function Home() {
                         Recibe
                       </div>
                       <div className="mt-1 font-display text-xl text-emerald-300">
-                        Guardia {selectedRelation || "—"}
+                        Guardia {selectedRelation ? GUARD_LABEL[selectedRelation] : "—"}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
@@ -1887,7 +1917,7 @@ export default function Home() {
                   <input
                     value={responsibleDraft}
                     onChange={event => setResponsibleDraft(event.target.value)}
-                    disabled={!isFacilitator}
+                    disabled
                   className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-amber-300/40"
                 />
               </label>
@@ -1953,7 +1983,7 @@ export default function Home() {
                             </span>
                           </div>
                           <div className="mt-1 text-[11px] text-slate-500">
-                            {item.actorName || "Usuario"} · Guardia {item.guard}
+                            {item.actorName || "Usuario"} · Guardia {GUARD_LABEL[item.guard as Guard]}
                           </div>
                           {item.note && (
                             <div className="mt-1 text-xs text-slate-400">
@@ -1984,7 +2014,7 @@ export default function Home() {
                   <Send className="h-3.5 w-3.5" /> Paquete de relevo
                 </div>
                 <h2 className="mt-1 font-display text-2xl text-white">
-                  {selectedWeek?.label} · Guardia {guard}
+                  {selectedWeek?.label} · Guardia {GUARD_LABEL[guard]}
                 </h2>
               </div>
               <button
@@ -2001,7 +2031,7 @@ export default function Home() {
                     Entrega
                   </div>
                   <div className="mt-1 font-display text-2xl text-white">
-                    Guardia {guard}
+                    Guardia {GUARD_LABEL[guard]}
                   </div>
                 </div>
                 <label className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.05] p-4">
@@ -2017,7 +2047,7 @@ export default function Home() {
                   >
                     {GUARDS.filter(item => item !== guard).map(item => (
                       <option key={item} value={item} className="bg-[#11191a]">
-                        Guardia {item}
+                        Guardia {GUARD_LABEL[item]}
                       </option>
                     ))}
                   </select>
@@ -2116,6 +2146,7 @@ export default function Home() {
                     label: newAccessLabel.trim(),
                     pin: newAccessPin,
                     role: newAccessRole,
+                    guard: newAccessGuard,
                   });
                 }}
                 className="mb-5 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-4"
@@ -2156,6 +2187,13 @@ export default function Home() {
                     <option value="facilitator">Facilitador</option>
                     <option value="supervisor">Supervisor</option>
                   </select>
+                  <select
+                    value={newAccessGuard}
+                    onChange={event => setNewAccessGuard(event.target.value as Guard)}
+                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none"
+                  >
+                    {GUARDS.map(item => <option key={item} value={item}>Guardia {GUARD_LABEL[item]}</option>)}
+                  </select>
                   <button
                     type="submit"
                     disabled={createAccessCodeMutation.isPending}
@@ -2171,13 +2209,23 @@ export default function Home() {
               <div className="mb-5 overflow-x-auto rounded-xl border border-white/[0.07]">
                 <table className="w-full min-w-[620px] text-left text-sm">
                   <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-500">
-                    <tr><th className="px-4 py-3">Usuario PIN</th><th className="px-4 py-3">Rol</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Último acceso</th><th className="px-4 py-3" /></tr>
+                    <tr><th className="px-4 py-3">Usuario PIN</th><th className="px-4 py-3">Rol / guardia</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Último acceso</th><th className="px-4 py-3" /></tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.05]">
                     {accessCodes.data?.map(code => (
                       <tr key={code.id}>
                         <td className="px-4 py-3 font-medium text-white">{code.label}</td>
-                        <td className="px-4 py-3 text-slate-300">{code.role === "facilitator" ? "Facilitador" : "Supervisor"}</td>
+                        <td className="px-4 py-3 text-slate-300">
+                          <div>{code.role === "facilitator" ? "Facilitador" : "Supervisor"}</div>
+                          <select
+                            value={code.guard}
+                            onChange={event => updateAccessCodeGuardMutation.mutate({ id: code.id, guard: event.target.value as Guard })}
+                            disabled={updateAccessCodeGuardMutation.isPending}
+                            className="mt-1 h-7 rounded-md border border-white/[0.08] bg-[#151e20] px-2 text-[11px] text-amber-200 outline-none"
+                          >
+                            {GUARDS.map(item => <option key={item} value={item}>Guardia {GUARD_LABEL[item]}</option>)}
+                          </select>
+                        </td>
                         <td className="px-4 py-3 text-xs">{code.active ? <span className="text-emerald-300">Activo</span> : <span className="text-slate-600">Desactivado</span>}</td>
                         <td className="px-4 py-3 text-xs text-slate-500">{formatDate(code.lastUsedAt)}</td>
                         <td className="px-4 py-3 text-right">{code.active && <button onClick={() => revokeAccessCodeMutation.mutate({ id: code.id })} className="rounded-lg border border-rose-400/20 px-2.5 py-1.5 text-[11px] font-semibold text-rose-300 hover:bg-rose-400/10">Desactivar</button>}</td>
@@ -2283,7 +2331,7 @@ export default function Home() {
                     <option value="">Sin relación configurada</option>
                     {GUARDS.filter(to => to !== from).map(to => (
                       <option key={to} value={to}>
-                        Guardia {to}
+                        Guardia {GUARD_LABEL[to]}
                       </option>
                     ))}
                   </select>

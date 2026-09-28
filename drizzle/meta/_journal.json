@@ -43,6 +43,13 @@
       "when": 1790608462971,
       "tag": "0005_dusty_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1790610182025,
+      "tag": "0006_lean_taskmaster",
+      "breakpoints": true
     }
   ]
 }

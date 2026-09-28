@@ -25,6 +25,7 @@ export const accessCodes = mysqlTable("accessCodes", {
   id: int("id").autoincrement().primaryKey(),
   label: varchar("label", { length: 120 }).notNull(),
   role: mysqlEnum("role", ["facilitator", "supervisor"]).notNull(),
+  guard: mysqlEnum("guard", ["A", "B", "C", "D"]).default("A").notNull(),
   salt: varchar("salt", { length: 64 }).notNull(),
   codeHash: varchar("codeHash", { length: 128 }).notNull(),
   active: boolean("active").default(true).notNull(),
