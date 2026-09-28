@@ -1609,13 +1609,21 @@ export default function Home() {
                                   "OT sin reserva (No requiere repuestos)"
                                 )}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-400">
-                                {row.state?.responsibleName || "—"}
-                                {row.execution?.status === "CERRADA_NOTIFICADA" && (
-                                  <div className="mt-1 max-w-[220px] text-[10px] font-semibold text-blue-200">
-                                    Cerrada por {row.execution.executedByName || "Usuario"} · {formatDate(row.execution.executedAt)}
+                              <td className="min-w-[190px] px-4 py-2.5 text-xs text-slate-400">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-600">Recepción</span>
+                                    <span className="truncate font-semibold text-slate-300">{row.state?.responsibleName || "Sin registrar"}</span>
                                   </div>
-                                )}
+                                  {row.execution?.status === "CERRADA_NOTIFICADA" && (
+                                    <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] pt-1.5">
+                                      <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-blue-300/60">Cierre</span>
+                                      <span className="truncate text-[10px] font-semibold text-blue-200" title={`${row.execution.executedByName || "Usuario"} · ${formatDate(row.execution.executedAt)}`}>
+                                        {row.execution.executedByName || "Usuario"} · {formatDate(row.execution.executedAt)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-500">
                                 {formatDate(row.state?.updatedAt)}
