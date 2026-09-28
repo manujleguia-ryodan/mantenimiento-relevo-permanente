@@ -230,6 +230,7 @@ export default function Home() {
   const [guard, setGuard] = useState<Guard>("A");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "TODOS">("TODOS");
+  const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -507,9 +508,13 @@ export default function Home() {
       const matchesStatus = statusFilter === "TODOS" || state === statusFilter;
       const matchesWarehouse =
         warehouseFilter === "TODOS" || warehouse === warehouseFilter;
-      return matchesSearch && matchesStatus && matchesWarehouse;
+      const matchesExecution =
+        executionFilter === "TODAS" ||
+        (executionFilter === "CERRADAS" && row.execution?.status === "CERRADA_NOTIFICADA") ||
+        (executionFilter === "PENDIENTES" && row.execution?.status !== "CERRADA_NOTIFICADA");
+      return matchesSearch && matchesStatus && matchesWarehouse && matchesExecution;
     });
-  }, [rows, search, statusFilter, warehouseFilter]);
+  }, [rows, search, statusFilter, warehouseFilter, executionFilter]);
 
   const kpis = useMemo(() => {
     const logisticsRows = rows.filter(
@@ -1408,7 +1413,25 @@ export default function Home() {
                         <option value="DONALDSON">Donaldson</option>
                         <option value="NINGUNO">Sin pendiente</option>
                       </select>
+                      {canCloseOt && (
+                        <select
+                          value={executionFilter}
+                          onChange={event => setExecutionFilter(event.target.value as typeof executionFilter)}
+                          className="h-10 rounded-xl border border-blue-300/15 bg-[#151e20] px-3 text-xs text-slate-300 outline-none"
+                          aria-label="Filtrar ejecución de OT"
+                        >
+                          <option value="TODAS">Todas las OT</option>
+                          <option value="PENDIENTES">Pendientes de cierre</option>
+                          <option value="CERRADAS">OT cerradas</option>
+                        </select>
+                      )}
                     </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    <span className="text-slate-400">Estados visuales:</span>
+                    <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Recibida</span>
+                    <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-400" /> Parcial / pendiente</span>
+                    <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Cerrada</span>
                   </div>
                   <div className="mt-4 max-h-[calc(100vh-360px)] min-h-[260px] overflow-auto rounded-xl border border-white/[0.06]">
                     <table className="w-full min-w-max text-left">
@@ -1439,7 +1462,7 @@ export default function Home() {
                             Pendiente
                           </th>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
-                            Responsable
+                            Responsable / cierre
                           </th>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
                             Actualizado
@@ -1519,6 +1542,11 @@ export default function Home() {
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-400">
                                 {row.state?.responsibleName || "—"}
+                                {row.execution?.status === "CERRADA_NOTIFICADA" && (
+                                  <div className="mt-1 max-w-[220px] text-[10px] font-semibold text-blue-200">
+                                    Cerrada por {row.execution.executedByName || "Usuario"} · {formatDate(row.execution.executedAt)}
+                                  </div>
+                                )}
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-500">
                                 {formatDate(row.state?.updatedAt)}
