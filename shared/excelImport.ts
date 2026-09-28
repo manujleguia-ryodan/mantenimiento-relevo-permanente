@@ -35,6 +35,7 @@ function normalizeEquipmentCode(value: unknown, sourceKey: string) {
   const code = String(value ?? "").trim().toUpperCase();
   const source = normalizeExcelHeader(sourceKey);
   if (source === "descripciondeubicaciontecnica" || source === "ubicaciontecnica") {
+    if (code === "0") return "SIN_EQUIPO";
     return code.replace(/^EQ_O/, "");
   }
   return code;

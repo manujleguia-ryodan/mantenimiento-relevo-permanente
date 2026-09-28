@@ -146,6 +146,17 @@ describe("Excel import mapping", () => {
     expect(result.rows.map(row => row.equipmentCode)).toEqual(["CR02", "CA13"]);
   });
 
+  it("uses an explicit bucket for empty technical locations", () => {
+    const result = mapExcelRows([
+      {
+        "ORDEN DE TRABAJO": "3",
+        "DESCRIPCIÓN DE UBICACIÓN TÉCNICA": 0,
+      },
+    ]);
+
+    expect(result.rows[0]?.equipmentCode).toBe("SIN_EQUIPO");
+  });
+
   it("fails with a clear message when OT or equipment columns are missing", () => {
     expect(() =>
       mapExcelRows([{ Semana: "SEM 38", Tarea: "Inspección" }])
