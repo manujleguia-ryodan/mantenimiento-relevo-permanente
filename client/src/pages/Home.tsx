@@ -248,6 +248,11 @@ export default function Home() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showCorrectiveOt, setShowCorrectiveOt] = useState(false);
+  const [correctiveOtNumber, setCorrectiveOtNumber] = useState("");
+  const [correctiveEquipment, setCorrectiveEquipment] = useState("");
+  const [correctiveReservation, setCorrectiveReservation] = useState("");
+  const [correctiveDescription, setCorrectiveDescription] = useState("");
   const [showRelations, setShowRelations] = useState(false);
   const [showAccessManagement, setShowAccessManagement] = useState(false);
   const [editingRow, setEditingRow] = useState<any | null>(null);
@@ -330,6 +335,18 @@ export default function Home() {
       setImportPreview(null);
       void utils.maintenance.bootstrap.invalidate();
       setSelectedWeekId(result.weekId);
+    },
+    onError: error => toast.error(error.message),
+  });
+  const createCorrectiveOtMutation = trpc.maintenance.createCorrectiveOt.useMutation({
+    onSuccess: () => {
+      toast.success("OT correctiva creada y visible en el panel.");
+      setShowCorrectiveOt(false);
+      setCorrectiveOtNumber("");
+      setCorrectiveEquipment("");
+      setCorrectiveReservation("");
+      setCorrectiveDescription("");
+      void utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
   });
@@ -959,7 +976,6 @@ export default function Home() {
               { id: "panel", label: "Panel de control", icon: BarChart3 },
               { id: "equipos", label: "Equipos de mi guardia", icon: Truck },
               { id: "ot", label: "OT y recepción", icon: ClipboardCheck },
-              { id: "relevo", label: "Generar relevo", icon: Send },
             ].filter(item => item.id !== "relevo" || isFacilitator).map(item => (
               <button
                 key={item.id}
@@ -982,15 +998,6 @@ export default function Home() {
               >
                 <Import className="h-4 w-4" />
                 Importar Excel semanal
-              </button>
-            )}
-            {isAdmin && (
-              <button
-                onClick={() => setShowRelations(true)}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white"
-              >
-                <Settings2 className="h-4 w-4" />
-                Configurar guardias
               </button>
             )}
             {isAdmin && (
@@ -1069,14 +1076,14 @@ export default function Home() {
                       <Upload className="h-4 w-4" /> Importar Excel
                     </button>
                   )}
-                  {isFacilitator && <button
-                    onClick={() => {
-                      if (selectedWeekId) setShowHandover(true);
-                    }}
-                    className="inline-flex items-center gap-2 rounded-xl bg-amber-300 px-3.5 py-2.5 text-xs font-bold text-[#0a0f10] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Send className="h-4 w-4" /> Generar relevo
-                  </button>}
+                  {isFacilitator && (
+                    <button
+                      onClick={() => setShowCorrectiveOt(true)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-sky-300/25 bg-sky-300/10 px-3.5 py-2.5 text-xs font-bold text-sky-200 transition hover:bg-sky-300/15"
+                    >
+                      <ClipboardCheck className="h-4 w-4" /> Crear OT correctiva
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="mt-8 flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-[#101718] p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1644,7 +1651,7 @@ export default function Home() {
                   </div>
                 </section>
 
-                {isFacilitator && <section
+                {false && isFacilitator && <section
                   id="relevo"
                   className="mt-6 scroll-mt-24 rounded-2xl border border-amber-300/15 bg-gradient-to-br from-amber-300/[0.08] to-transparent p-5"
                 >
@@ -1684,7 +1691,7 @@ export default function Home() {
                         Recibe
                       </div>
                       <div className="mt-1 font-display text-xl text-emerald-300">
-                        Guardia {selectedRelation ? GUARD_LABEL[selectedRelation] : "—"}
+                        Guardia {selectedRelation ? GUARD_LABEL[selectedRelation as Guard] : "—"}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
@@ -1702,6 +1709,44 @@ export default function Home() {
           </div>
         </main>
       </div>
+
+      {showCorrectiveOt && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-2xl border border-sky-300/20 bg-[#11191a] shadow-2xl">
+            <div className="flex items-start justify-between border-b border-white/[0.07] p-5">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-sky-300">Nueva orden</div>
+                <h2 className="mt-1 font-display text-2xl text-white">Crear OT correctiva</h2>
+                <p className="mt-1 text-sm text-slate-500">Se guardará en Semana {selectedWeek?.weekNumber ?? "—"} · Guardia {GUARD_LABEL[guard]} y quedará disponible para revisión.</p>
+              </div>
+              <button onClick={() => setShowCorrectiveOt(false)} className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <form
+              className="grid gap-4 p-5"
+              onSubmit={event => {
+                event.preventDefault();
+                if (!selectedWeekId) return toast.error("Selecciona una semana antes de crear la OT.");
+                createCorrectiveOtMutation.mutate({
+                  weekId: selectedWeekId,
+                  guard,
+                  otNumber: correctiveOtNumber,
+                  equipmentCode: correctiveEquipment,
+                  reservation: correctiveReservation || undefined,
+                  description: correctiveDescription,
+                });
+              }}
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs text-slate-400">OT<input required value={correctiveOtNumber} onChange={event => setCorrectiveOtNumber(event.target.value)} placeholder="Ej. 69001234" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+                <label className="text-xs text-slate-400">Equipo<input required value={correctiveEquipment} onChange={event => setCorrectiveEquipment(event.target.value)} placeholder="Ej. CA13 o CR02" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+              </div>
+              <label className="text-xs text-slate-400">Reserva <span className="text-slate-600">(opcional)</span><input value={correctiveReservation} onChange={event => setCorrectiveReservation(event.target.value)} placeholder="Código de reserva o dejar vacío" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+              <label className="text-xs text-slate-400">Descripción de operación<textarea required value={correctiveDescription} onChange={event => setCorrectiveDescription(event.target.value)} placeholder="Describe el trabajo correctivo" rows={3} className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+              <div className="flex justify-end gap-2 pt-1"><button type="button" onClick={() => setShowCorrectiveOt(false)} className="rounded-xl px-4 py-2.5 text-sm text-slate-400 hover:bg-white/5">Cancelar</button><button type="submit" disabled={createCorrectiveOtMutation.isPending} className="rounded-xl bg-sky-300 px-4 py-2.5 text-sm font-bold text-[#071014] disabled:opacity-50">{createCorrectiveOtMutation.isPending ? "Guardando…" : "Crear OT"}</button></div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showImport && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">

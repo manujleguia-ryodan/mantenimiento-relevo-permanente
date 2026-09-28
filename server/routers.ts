@@ -333,6 +333,56 @@ export const appRouter = router({
         return { weekId, otCount, equipmentCount, duplicateCount };
       }),
 
+    createCorrectiveOt: facilitatorProcedure
+      .input(z.object({
+        weekId: z.number().int().positive(),
+        guard: guardSchema,
+        otNumber: z.string().trim().min(1).max(80),
+        equipmentCode: z.string().trim().min(1).max(80),
+        reservation: z.string().trim().max(160).optional(),
+        description: z.string().trim().min(1).max(10000),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const equipmentCode = input.equipmentCode.toUpperCase();
+        const [duplicate] = await db.select({ id: workOrders.id })
+          .from(workOrders)
+          .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.otNumber, input.otNumber)))
+          .limit(1);
+        if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "Ya existe una OT con ese número en esta semana." });
+        const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, equipmentCode)).limit(1);
+        const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code: equipmentCode }));
+        const sourceData = JSON.stringify({
+          Reserva: input.reservation ?? "",
+          "Descripción de operación": input.description,
+          Tipo: "Correctiva",
+        });
+        const inserted = await db.insert(workOrders).values({
+          weekId: input.weekId,
+          otNumber: input.otNumber,
+          equipmentId,
+          description: input.description,
+          sourceData,
+        });
+        const [assignment] = await db.select({ id: guardAssignments.id })
+          .from(guardAssignments)
+          .where(and(
+            eq(guardAssignments.weekId, input.weekId),
+            eq(guardAssignments.guard, input.guard),
+            eq(guardAssignments.equipmentId, equipmentId)
+          ))
+          .limit(1);
+        if (!assignment) {
+          await db.insert(guardAssignments).values({
+            weekId: input.weekId,
+            guard: input.guard,
+            equipmentId,
+            selectedById: ctx.user.id,
+          });
+        }
+        return { success: true, workOrderId: insertId(inserted), equipmentId };
+      }),
+
     saveAssignments: facilitatorProcedure
       .input(
         z.object({
