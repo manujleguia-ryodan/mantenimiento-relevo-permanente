@@ -31,6 +31,7 @@ import {
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
+import { ENV } from "./_core/env";
 import {
   hasReservation,
   validateReceptionInput,
@@ -552,6 +553,11 @@ export const appRouter = router({
       .input(z.object({ userId: z.number().int().positive(), role: managedRoleSchema }))
       .mutation(async ({ input }) => {
         const db = await requireDb();
+        const [target] = await db.select({ openId: users.openId }).from(users).where(eq(users.id, input.userId)).limit(1);
+        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Usuario no encontrado." });
+        if (target.openId === ENV.ownerOpenId && input.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "El propietario debe conservar el perfil Administrador." });
+        }
         await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId));
         return { success: true };
       }),

@@ -101,7 +101,7 @@ describe("shared PIN access", () => {
       id: 0,
       name: "Acceso compartido",
       email: null,
-      role: "facilitator",
+      role: "admin",
     });
     expect(login.writtenCookies).toHaveLength(1);
     expect(login.writtenCookies[0]?.name).toBe(SHARED_ACCESS_COOKIE);
@@ -117,7 +117,7 @@ describe("shared PIN access", () => {
     await expect(
       appRouter.createCaller(authenticated.ctx).auth.me()
     ).resolves.toMatchObject({
-      role: "facilitator",
+      role: "admin",
       name: "Acceso compartido",
     });
 
