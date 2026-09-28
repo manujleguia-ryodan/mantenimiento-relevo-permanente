@@ -55,21 +55,36 @@ function parseCorrectiveLines(value: string) {
   const rows: CorrectiveDraft[] = [];
   const invalid: string[] = [];
   for (const rawLine of value.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) {
-    const ot = rawLine.match(/^OT\s+(\S+)/i);
-    const reservation = rawLine.match(/\bR\s+(\S+)/i);
-    const equipment = rawLine.match(/\b([A-Z]{1,6}\d{1,4})\s*$/i);
-    if (!ot || !reservation || !equipment) {
+    const tokens = Array.from(rawLine.matchAll(/\b[A-Z0-9_-]+\b/gi)).map(match => ({
+      value: match[0],
+      index: match.index ?? 0,
+    }));
+    const otToken = tokens.find(token => /^(?:OT)?[67]\d{5,}$/i.test(token.value));
+    const reservationToken = tokens.find(token => /^(?:R)?[34]\d{5,}$/i.test(token.value));
+    const equipmentToken = tokens.find(token =>
+      /^[A-Z]{1,6}\d{1,4}$/i.test(token.value) && !/^(?:OT|R|CR)\d+$/i.test(token.value)
+    );
+    if (!otToken || !equipmentToken) {
       invalid.push(rawLine);
       continue;
     }
-    const start = (reservation.index ?? 0) + reservation[0].length;
-    const end = equipment.index ?? rawLine.length;
-    const description = rawLine.slice(start, end).replace(/^\s*(?:CR\s+)?/i, "").trim();
+    const excluded = new Set([otToken.index, equipmentToken.index]);
+    if (reservationToken) excluded.add(reservationToken.index);
+    const description = tokens
+      .filter(token => !excluded.has(token.index) && !/^(?:OT|R|CR)$/i.test(token.value))
+      .map(token => token.value)
+      .join(" ")
+      .trim();
     if (!description) {
       invalid.push(rawLine);
       continue;
     }
-    rows.push({ otNumber: ot[1], reservation: reservation[1], equipmentCode: equipment[1].toUpperCase(), description });
+    rows.push({
+      otNumber: otToken.value.replace(/^OT/i, ""),
+      reservation: reservationToken?.value.replace(/^R/i, "") ?? "",
+      equipmentCode: equipmentToken.value.toUpperCase(),
+      description,
+    });
   }
   return { rows, invalid };
 }
