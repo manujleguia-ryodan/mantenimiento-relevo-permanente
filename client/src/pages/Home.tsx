@@ -90,6 +90,18 @@ function formatDate(value: unknown) {
   });
 }
 
+function detectWeekFromExcel(fileName: string, matrix: unknown[][]) {
+  const source = [fileName, ...matrix.slice(0, 40).flat()]
+    .map(value => String(value ?? ""))
+    .join(" ");
+  const weekMatch = source.match(/(?:sem(?:ana)?|week|wk)[\s_-]*(?:n[°ºo]?\s*)?(\d{1,2})/i);
+  if (!weekMatch) return null;
+  const weekNumber = Number(weekMatch[1]);
+  if (weekNumber < 1 || weekNumber > 53) return null;
+  const yearMatch = source.match(/\b(20\d{2})\b/);
+  return { weekNumber, year: yearMatch ? Number(yearMatch[1]) : new Date().getFullYear() };
+}
+
 function getImportedFields(sourceData?: string | null): Record<string, string> {
   if (!sourceData) return {};
   try {
@@ -270,6 +282,7 @@ export default function Home() {
     }>;
     invalid: number;
     duplicates: number;
+    detectedWeek: { weekNumber: number; year: number } | null;
   } | null>(null);
   const [importWeekNumber, setImportWeekNumber] = useState(
     String(getIsoWeek(new Date()))
@@ -277,6 +290,7 @@ export default function Home() {
   const [importYear, setImportYear] = useState(
     String(new Date().getFullYear())
   );
+  const [currentTime, setCurrentTime] = useState(() => new Date());
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -460,6 +474,11 @@ export default function Home() {
   }, [assignedGuard, isAdmin]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (!selectedWeekId && weeks[0]) setSelectedWeekId(weeks[0].id);
   }, [selectedWeekId, weeks]);
 
@@ -578,6 +597,11 @@ export default function Home() {
         defval: "",
         raw: false,
       }) as unknown[][];
+      const detectedWeek = detectWeekFromExcel(file.name, matrix);
+      if (detectedWeek) {
+        setImportWeekNumber(String(detectedWeek.weekNumber));
+        setImportYear(String(detectedWeek.year));
+      }
       const rawRows =
         rowsFromExcelMatrix(matrix) ??
         XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
@@ -591,6 +615,7 @@ export default function Home() {
         rows: result.rows,
         invalid: result.invalid,
         duplicates: result.duplicates,
+        detectedWeek,
       });
       toast.success(
         `${result.rows.length} OT detectadas. Revisa la vista previa antes de confirmar.`
@@ -1024,7 +1049,18 @@ export default function Home() {
                     únicamente lo que necesita atención.
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <div className="mr-1 flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2 text-right">
+                    <Clock3 className="h-4 w-4 text-amber-300" />
+                    <div>
+                      <div className="font-mono text-sm font-bold tabular-nums text-white">
+                        {currentTime.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      </div>
+                      <div className="text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                        {currentTime.toLocaleDateString("es-PE", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}
+                      </div>
+                    </div>
+                  </div>
                   {isFacilitator && (
                     <button
                       onClick={() => setShowImport(true)}
@@ -1772,8 +1808,10 @@ export default function Home() {
                         {importPreview.duplicates} repeticiones de OT detectadas
                       </div>
                     </div>
-                    <div className="rounded-lg bg-emerald-400/10 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300">
-                      Vista previa lista
+                    <div className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold ${importPreview.detectedWeek ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-300/10 text-amber-200"}`}>
+                      {importPreview.detectedWeek
+                        ? `Semana ${importPreview.detectedWeek.weekNumber} · ${importPreview.detectedWeek.year}`
+                        : "Semana no detectada · revisar campos"}
                     </div>
                   </div>
                   <div className="overflow-x-auto">
