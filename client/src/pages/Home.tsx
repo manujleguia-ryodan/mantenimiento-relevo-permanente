@@ -5,6 +5,7 @@ import {
   normalizeExcelHeader,
   rowsFromExcelMatrix,
 } from "@shared/excelImport";
+import { hasReservation } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -206,7 +207,15 @@ function KpiCard({
 export default function Home() {
   const { user, loading: authLoading, isAuthenticated, logout } = useAuth();
   const isAdmin = user?.role === "admin";
-  const isFacilitator = isAdmin;
+  const isFacilitator = isAdmin || user?.role === "facilitator";
+  const isViewer = user?.role === "viewer";
+  const roleLabel = isAdmin
+    ? "Administrador"
+    : isFacilitator
+      ? "Facilitador"
+      : isViewer
+        ? "Visualizador"
+        : "Supervisor";
   const [pin, setPin] = useState("");
   const [pinLoginError, setPinLoginError] = useState<string | null>(null);
   const [selectedWeekId, setSelectedWeekId] = useState<number | null>(null);
@@ -218,6 +227,7 @@ export default function Home() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showRelations, setShowRelations] = useState(false);
+  const [showAccessManagement, setShowAccessManagement] = useState(false);
   const [editingRow, setEditingRow] = useState<any | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showHandover, setShowHandover] = useState(false);
@@ -274,6 +284,9 @@ export default function Home() {
     { workOrderId: editingRow?.workOrder?.id ?? 0 },
     { enabled: Boolean(showHistory && editingRow?.workOrder?.id) }
   );
+  const accessUsers = trpc.maintenance.listUsers.useQuery(undefined, {
+    enabled: Boolean(isAdmin && showAccessManagement),
+  });
 
   const importMutation = trpc.maintenance.importWeek.useMutation({
     onSuccess: result => {
@@ -332,6 +345,13 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const userRoleMutation = trpc.maintenance.updateUserRole.useMutation({
+    onSuccess: () => {
+      toast.success("Rol de usuario actualizado.");
+      void accessUsers.refetch();
+    },
+    onError: error => toast.error(error.message),
+  });
 
   const weeks = bootstrap.data?.weeks ?? [];
   const allEquipment =
@@ -371,6 +391,10 @@ export default function Home() {
     : [];
   const selectedWeek = weeks.find(week => week.id === selectedWeekId);
   const selectedRelation = relationsDraft[guard];
+  const editingRequiresLogistics = Boolean(
+    editingRow &&
+      (editingRow.requiresLogistics ?? hasReservation(editingRow.workOrder.sourceData))
+  );
 
   useEffect(() => {
     if (!selectedWeekId && weeks[0]) setSelectedWeekId(weeks[0].id);
@@ -426,17 +450,20 @@ export default function Home() {
   }, [rows, search, statusFilter, warehouseFilter]);
 
   const kpis = useMemo(() => {
-    const total = rows.length;
-    const received = rows.filter(
+    const logisticsRows = rows.filter(
+      row => row.requiresLogistics ?? hasReservation(row.workOrder.sourceData)
+    );
+    const total = logisticsRows.length;
+    const received = logisticsRows.filter(
       row => row.state?.status === "RECIBIDA"
     ).length;
-    const partial = rows.filter(row => row.state?.status === "PARCIAL").length;
-    const missing = rows.filter(
+    const partial = logisticsRows.filter(row => row.state?.status === "PARCIAL").length;
+    const missing = logisticsRows.filter(
       row => row.state?.status === "FALTA_RECIBIR"
     ).length;
-    const pendingWarehouse1 = rows.filter(row => (row.pendingWarehouses ?? []).some((item: any) => item.warehouseCodeSnapshot === "CENTRAL")).length;
-    const pendingWarehouse2 = rows.filter(row => (row.pendingWarehouses ?? []).some((item: any) => item.warehouseCodeSnapshot === "FERREYROS")).length;
-    const pendingDonaldson = rows.filter(row => (row.pendingWarehouses ?? []).some((item: any) => item.warehouseCodeSnapshot === "DONALDSON")).length;
+    const pendingWarehouse1 = logisticsRows.filter(row => (row.pendingWarehouses ?? []).some((item: any) => item.warehouseCodeSnapshot === "CENTRAL")).length;
+    const pendingWarehouse2 = logisticsRows.filter(row => (row.pendingWarehouses ?? []).some((item: any) => item.warehouseCodeSnapshot === "FERREYROS")).length;
+    const pendingDonaldson = logisticsRows.filter(row => (row.pendingWarehouses ?? []).some((item: any) => item.warehouseCodeSnapshot === "DONALDSON")).length;
     const both = pendingDonaldson;
     return {
       total,
@@ -447,6 +474,7 @@ export default function Home() {
       pendingWarehouse2,
       both,
       pendingDonaldson,
+      withoutReservation: rows.length - total,
       percent: total ? Math.round((received / total) * 100) : 0,
     };
   }, [rows]);
@@ -462,6 +490,8 @@ export default function Home() {
 
   async function handleFile(file: File) {
     try {
+      if (!isFacilitator)
+        throw new Error("Solo un Facilitador o Administrador puede importar Excel.");
       const allowedExtensions = [".xlsx", ".xls", ".csv"];
       const fileName = file.name.toLowerCase();
       if (!allowedExtensions.some(extension => fileName.endsWith(extension))) {
@@ -522,6 +552,10 @@ export default function Home() {
 
   function submitImport() {
     if (!importPreview) return;
+    if (!isFacilitator) {
+      toast.error("Solo un Facilitador o Administrador puede importar Excel.");
+      return;
+    }
     const weekNumber = Number(importWeekNumber);
     const year = Number(importYear);
     if (!weekNumber || weekNumber < 1 || weekNumber > 53 || !year) {
@@ -539,6 +573,7 @@ export default function Home() {
   }
 
   function toggleEquipment(id: number) {
+    if (!isFacilitator) return;
     if (!Number.isSafeInteger(id) || id <= 0) return;
     const current = selectedEquipmentIds.filter(
       item => Number.isSafeInteger(item) && item > 0
@@ -557,6 +592,14 @@ export default function Home() {
 
   function submitReception() {
     if (!editingRow || !selectedWeekId) return;
+    if (!isFacilitator) {
+      toast.error("Solo un Facilitador o Administrador puede registrar recepción.");
+      return;
+    }
+    if (!(editingRow.requiresLogistics ?? hasReservation(editingRow.workOrder.sourceData))) {
+      toast.error("Esta OT no tiene reserva y no requiere clasificación logística.");
+      return;
+    }
     receptionMutation.mutate({
       workOrderId: editingRow.workOrder.id,
       weekId: selectedWeekId,
@@ -570,6 +613,10 @@ export default function Home() {
 
   function submitHandover() {
     if (!selectedWeekId) return;
+    if (!isFacilitator) {
+      toast.error("Solo un Facilitador o Administrador puede generar relevo.");
+      return;
+    }
     handoverMutation.mutate({
       weekId: selectedWeekId,
       fromGuard: guard,
@@ -790,7 +837,7 @@ export default function Home() {
               { id: "equipos", label: "Equipos de mi guardia", icon: Truck },
               { id: "ot", label: "OT y recepción", icon: ClipboardCheck },
               { id: "relevo", label: "Generar relevo", icon: Send },
-            ].map(item => (
+            ].filter(item => item.id !== "relevo" || isFacilitator).map(item => (
               <button
                 key={item.id}
                 onClick={() => scrollTo(item.id)}
@@ -805,13 +852,15 @@ export default function Home() {
             Administración
           </div>
           <nav className="mt-3 space-y-1">
-            <button
-              onClick={() => setShowImport(true)}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white"
-            >
-              <Import className="h-4 w-4" />
-              Importar Excel semanal
-            </button>
+            {isFacilitator && (
+              <button
+                onClick={() => setShowImport(true)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white"
+              >
+                <Import className="h-4 w-4" />
+                Importar Excel semanal
+              </button>
+            )}
             {isAdmin && (
               <button
                 onClick={() => setShowRelations(true)}
@@ -819,6 +868,15 @@ export default function Home() {
               >
                 <Settings2 className="h-4 w-4" />
                 Configurar guardias
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={() => setShowAccessManagement(true)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Gestionar accesos
               </button>
             )}
           </nav>
@@ -832,7 +890,7 @@ export default function Home() {
                   {user?.name ?? "Usuario"}
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">
-                  {isFacilitator ? "Facilitador" : "Supervisor"}
+                  {roleLabel}
                 </div>
               </div>
               <button
@@ -869,12 +927,14 @@ export default function Home() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => setShowImport(true)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3.5 py-2.5 text-xs font-bold text-amber-200 transition hover:bg-amber-300/15"
-                  >
-                    <Upload className="h-4 w-4" /> Importar Excel
-                  </button>
+                  {isFacilitator && (
+                    <button
+                      onClick={() => setShowImport(true)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3.5 py-2.5 text-xs font-bold text-amber-200 transition hover:bg-amber-300/15"
+                    >
+                      <Upload className="h-4 w-4" /> Importar Excel
+                    </button>
+                  )}
                   {isFacilitator && <button
                     onClick={() => {
                       if (selectedWeekId) setShowHandover(true);
@@ -949,20 +1009,22 @@ export default function Home() {
                   Sube el Excel semanal, revisa las filas detectadas y luego
                   asigna equipos a la guardia actual.
                 </p>
-                <button
-                  onClick={() => setShowImport(true)}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-amber-300 px-4 py-2.5 text-sm font-bold text-[#0a0f10]"
-                >
-                  <Upload className="h-4 w-4" /> Importar primera semana
-                </button>
+                {isFacilitator && (
+                  <button
+                    onClick={() => setShowImport(true)}
+                    className="mt-5 inline-flex items-center gap-2 rounded-xl bg-amber-300 px-4 py-2.5 text-sm font-bold text-[#0a0f10]"
+                  >
+                    <Upload className="h-4 w-4" /> Importar primera semana
+                  </button>
+                )}
               </div>
             ) : (
               <>
                 <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                   <KpiCard
-                    label="OT visibles"
+                    label="OT con reserva"
                     value={kpis.total}
-                    detail={`${selectedWeek?.label ?? "Semana"} · Guardia ${guard}`}
+                    detail={`${kpis.withoutReservation} sin reserva excluidas`}
                     color="bg-sky-400"
                     icon={ClipboardCheck}
                   />
@@ -1133,7 +1195,8 @@ export default function Home() {
                       <button
                         key={item.id}
                         onClick={() => toggleEquipment(item.id)}
-                        className={`flex items-center justify-between rounded-xl border px-3 py-3 text-left transition ${selectedEquipmentIds.includes(item.id) ? "border-amber-300/40 bg-amber-300/10 text-amber-100" : "border-white/[0.07] bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-white"}`}
+                        disabled={!isFacilitator}
+                        className={`flex items-center justify-between rounded-xl border px-3 py-3 text-left transition disabled:cursor-default disabled:opacity-70 ${selectedEquipmentIds.includes(item.id) ? "border-amber-300/40 bg-amber-300/10 text-amber-100" : "border-white/[0.07] bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-white"}`}
                       >
                         <span>
                           <span className="block font-mono text-sm font-semibold">
@@ -1268,6 +1331,8 @@ export default function Home() {
                           const fields = getImportedFields(
                             row.workOrder.sourceData
                           );
+                          const requiresLogistics =
+                            row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
                           return (
                             <tr
                               key={row.workOrder.id}
@@ -1295,11 +1360,23 @@ export default function Home() {
                                 );
                               })}
                               <td className="whitespace-nowrap px-4 py-4">
-                                <StatusPill status={state} />
+                                {requiresLogistics ? (
+                                  <StatusPill status={state} />
+                                ) : (
+                                  <span className="text-xs text-slate-500">
+                                    Sin reserva
+                                  </span>
+                                )}
                               </td>
                               <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-400">
-                                {pending}
-                                {row.inheritedFrom && <div className="mt-1 text-[10px] text-amber-300">Pendiente heredado de Guardia {row.inheritedFrom}</div>}
+                                {requiresLogistics ? (
+                                  <>
+                                    {pending}
+                                    {row.inheritedFrom && <div className="mt-1 text-[10px] text-amber-300">Pendiente heredado de Guardia {row.inheritedFrom}</div>}
+                                  </>
+                                ) : (
+                                  "OT sin reserva (No requiere repuestos)"
+                                )}
                               </td>
                               <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-400">
                                 {row.state?.responsibleName || "—"}
@@ -1308,12 +1385,14 @@ export default function Home() {
                                 {formatDate(row.state?.updatedAt)}
                               </td>
                               <td className="whitespace-nowrap px-4 py-4 text-right">
-                                <button
-                                  onClick={() => openEdit(row)}
-                                  className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 opacity-70 transition hover:border-amber-300/30 hover:text-amber-200 group-hover:opacity-100"
-                                >
-                                  Revisar
-                                </button>
+                                {isFacilitator && requiresLogistics && (
+                                  <button
+                                    onClick={() => openEdit(row)}
+                                    className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 opacity-70 transition hover:border-amber-300/30 hover:text-amber-200 group-hover:opacity-100"
+                                  >
+                                    Revisar
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           );
@@ -1344,7 +1423,7 @@ export default function Home() {
                   </div>
                 </section>
 
-                <section
+                {isFacilitator && <section
                   id="relevo"
                   className="mt-6 scroll-mt-24 rounded-2xl border border-amber-300/15 bg-gradient-to-br from-amber-300/[0.08] to-transparent p-5"
                 >
@@ -1396,7 +1475,7 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
-                </section>
+                </section>}
               </>
             )}
           </div>
@@ -1592,7 +1671,7 @@ export default function Home() {
                 </button>
                 <button
                   disabled={
-                    !importPreview || importMutation.isPending || !isAdmin
+                    !importPreview || importMutation.isPending || !isFacilitator
                   }
                   onClick={submitImport}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-2.5 text-sm font-bold text-[#0a0f10] disabled:cursor-not-allowed disabled:opacity-40"
@@ -1603,9 +1682,9 @@ export default function Home() {
                   Confirmar importación
                 </button>
               </div>
-              {!isAdmin && (
+              {!isFacilitator && (
                 <div className="text-right text-xs text-amber-300/70">
-                  Solo un administrador puede confirmar una importación.
+                  Solo un Facilitador o Administrador puede confirmar una importación.
                 </div>
               )}
             </div>
@@ -1637,6 +1716,14 @@ export default function Home() {
               </button>
             </div>
             <div className="space-y-6 p-5">
+              {!editingRequiresLogistics ? (
+                <div className="rounded-xl border border-slate-500/20 bg-slate-500/[0.06] p-4 text-sm text-slate-300">
+                  <div className="font-semibold text-white">OT sin reserva</div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    No requiere repuestos ni clasificación logística de recepción.
+                  </p>
+                </div>
+              ) : <>
               <div>
                 <div className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
                   Estado de recepción
@@ -1678,17 +1765,19 @@ export default function Home() {
               )}
               <label className="block text-xs font-bold uppercase tracking-[0.15em] text-slate-500">
                 Recibido / revisado por
-                <input
-                  value={responsibleDraft}
-                  onChange={event => setResponsibleDraft(event.target.value)}
+                  <input
+                    value={responsibleDraft}
+                    onChange={event => setResponsibleDraft(event.target.value)}
+                    disabled={!isFacilitator}
                   className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm normal-case tracking-normal text-white outline-none focus:border-amber-300/40"
                 />
               </label>
               <label className="block text-xs font-bold uppercase tracking-[0.15em] text-slate-500">
                 Observación
-                <textarea
-                  value={noteDraft}
-                  onChange={event => setNoteDraft(event.target.value)}
+                  <textarea
+                    value={noteDraft}
+                    onChange={event => setNoteDraft(event.target.value)}
+                    disabled={!isFacilitator}
                   rows={4}
                   placeholder="Ej.: pendiente reserva de almacén 2"
                   className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.035] p-3 text-sm normal-case tracking-normal text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40"
@@ -1714,13 +1803,14 @@ export default function Home() {
                   )}{" "}
                   Guardar recepción
                 </button>
-                <button
+              </div>
+              </>}
+              <button
                   onClick={() => setShowHistory(!showHistory)}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/[0.09] px-4 py-3 text-sm font-semibold text-slate-300 hover:bg-white/5"
                 >
                   <History className="h-4 w-4" /> Historial
                 </button>
-              </div>
               {showHistory && (
                 <div className="rounded-xl border border-white/[0.07] bg-black/10 p-4">
                   <div className="mb-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-500">
@@ -1868,6 +1958,80 @@ export default function Home() {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && showAccessManagement && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/10 bg-[#11191a] shadow-2xl">
+            <div className="flex items-start justify-between border-b border-white/[0.07] p-5">
+              <div>
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Administración
+                </div>
+                <h2 className="mt-1 font-display text-2xl text-white">
+                  Gestionar accesos
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Asigna el nivel operativo de quienes ya iniciaron sesión en el sistema.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAccessManagement(false)}
+                className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-5">
+              <div className="overflow-x-auto rounded-xl border border-white/[0.07]">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Usuario</th>
+                      <th className="px-4 py-3">Correo</th>
+                      <th className="px-4 py-3">Rol</th>
+                      <th className="px-4 py-3">Último acceso</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.05]">
+                    {accessUsers.isLoading ? (
+                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500"><RefreshCw className="mx-auto h-4 w-4 animate-spin text-amber-300" /></td></tr>
+                    ) : accessUsers.data?.length ? (
+                      accessUsers.data.map(person => (
+                        <tr key={person.id}>
+                          <td className="px-4 py-3 font-medium text-white">{person.name || "Sin nombre"}</td>
+                          <td className="px-4 py-3 text-slate-400">{person.email || "—"}</td>
+                          <td className="px-4 py-3">
+                            <select
+                              value={person.role === "user" ? "supervisor" : person.role}
+                              onChange={event => userRoleMutation.mutate({
+                                userId: person.id,
+                                role: event.target.value as "admin" | "facilitator" | "supervisor" | "viewer",
+                              })}
+                              disabled={userRoleMutation.isPending}
+                              className="h-9 rounded-lg border border-white/[0.08] bg-[#151e20] px-2 text-xs text-white outline-none disabled:opacity-50"
+                            >
+                              <option value="admin">Administrador</option>
+                              <option value="facilitator">Facilitador</option>
+                              <option value="supervisor">Supervisor</option>
+                              <option value="viewer">Visualizador</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-500">{formatDate(person.lastSignedIn)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Aún no hay usuarios registrados.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-xs leading-5 text-slate-500">
+                Administrador: acceso total. Facilitador: importación, recepción y relevo. Supervisor: visualización operativa. Visualizador: solo consulta y KPIs.
+              </p>
             </div>
           </div>
         </div>

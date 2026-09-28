@@ -22,6 +22,13 @@
       "when": 1790604534314,
       "tag": "0002_typical_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1790607104619,
+      "tag": "0003_living_monster_badoon",
+      "breakpoints": true
     }
   ]
 }

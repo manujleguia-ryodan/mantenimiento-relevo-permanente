@@ -80,7 +80,7 @@ export function createSharedAccessUser(now = new Date()): User {
     name: "Acceso compartido",
     email: null,
     loginMethod: "shared-pin",
-    role: "admin",
+    role: "facilitator",
     createdAt: now,
     updatedAt: now,
     lastSignedIn: now,

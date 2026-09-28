@@ -5,6 +5,7 @@ import {
   maintenanceWeeks, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { hasReservation } from "../shared/maintenance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
@@ -48,7 +49,11 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
   const pending = stateIds.length ? await db.select().from(otStatePendingWarehouses).where(inArray(otStatePendingWarehouses.otStateId, stateIds)) : [];
   const pendingByState = new Map<number, typeof pending>();
   for (const item of pending) { const list = pendingByState.get(item.otStateId) ?? []; list.push(item); pendingByState.set(item.otStateId, list); }
-  const enrichedRows = visibleRows.map(row => ({ ...row, pendingWarehouses: row.state?.id ? pendingByState.get(row.state.id) ?? [] : [] }));
+  const enrichedRows = visibleRows.map(row => ({
+    ...row,
+    requiresLogistics: hasReservation(row.workOrder.sourceData),
+    pendingWarehouses: row.state?.id ? pendingByState.get(row.state.id) ?? [] : [],
+  }));
   return { week, guard, selectedEquipmentIds: selectedIds, rows: enrichedRows, selectedEquipment: (await getEquipment()).filter(item => selectedIds.includes(item.id)), allEquipment: await getEquipment(), warehouses: await getWarehouses() };
 }
 

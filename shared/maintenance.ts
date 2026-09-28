@@ -3,6 +3,33 @@ export type ReceptionStatus = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RE
 export const WAREHOUSE_CODES = ["CENTRAL", "FERREYROS", "DONALDSON"] as const;
 export type WarehouseCode = string;
 
+function normalizeSourceKey(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+export function getReservationValue(sourceData?: string | null) {
+  if (!sourceData) return "";
+  try {
+    const parsed: unknown = JSON.parse(sourceData);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+    const entry = Object.entries(parsed as Record<string, unknown>).find(
+      ([key]) => normalizeSourceKey(key) === "reserva"
+    )?.[1];
+    const value = String(entry ?? "").trim();
+    return value === "0" || value === "—" || value === "-" ? "" : value;
+  } catch {
+    return "";
+  }
+}
+
+export function hasReservation(sourceData?: string | null) {
+  return Boolean(getReservationValue(sourceData));
+}
+
 export function getPendingWarehouseLabel(codes: string[] | boolean | null | undefined, legacySecond?: boolean) {
   if (typeof codes === "boolean") {
     if (codes && legacySecond) return "AMBOS";

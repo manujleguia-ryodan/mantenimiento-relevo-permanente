@@ -12,6 +12,7 @@ import {
   otHistory,
   otStatePendingWarehouses,
   otStates,
+  users,
   warehouses,
   workOrders,
 } from "../drizzle/schema";
@@ -30,6 +31,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import {
+  hasReservation,
   validateReceptionInput,
 } from "@shared/maintenance";
 import {
@@ -53,6 +55,7 @@ const statusSchema = z.enum([
   "PARCIAL",
   "FALTA_RECIBIR",
 ]);
+const managedRoleSchema = z.enum(["admin", "facilitator", "supervisor", "viewer"]);
 
 const sharedAccessProcedure = publicProcedure.use(({ ctx, next }) => {
   const user =
@@ -70,6 +73,15 @@ const adminProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Se requiere perfil administrador",
+    });
+  return next({ ctx });
+});
+
+const facilitatorProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin" && ctx.user.role !== "facilitator")
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Se requiere perfil Facilitador o Administrador.",
     });
   return next({ ctx });
 });
@@ -101,9 +113,6 @@ export function buildGuardAssignmentRows(
     selectedById,
   }));
 }
-
-// Roles funcionales aprobados: admin = Facilitador; user = Supervisor.
-const facilitatorProcedure = adminProcedure;
 
 function uniqueCodes(codes: string[]) {
   return Array.from(new Set(codes.map(code => code.trim().toUpperCase()).filter(Boolean)));
@@ -182,7 +191,7 @@ export const appRouter = router({
       )
       .query(({ input }) => getDashboardData(input.weekId, input.guard)),
 
-    importWeek: adminProcedure
+    importWeek: facilitatorProcedure
       .input(
         z.object({
           label: z.string().min(1).max(32),
@@ -289,7 +298,7 @@ export const appRouter = router({
         return { weekId, otCount, equipmentCount, duplicateCount };
       }),
 
-    saveAssignments: sharedAccessProcedure
+    saveAssignments: facilitatorProcedure
       .input(
         z.object({
           weekId: z.number().int().positive(),
@@ -334,6 +343,18 @@ export const appRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
+        const [workOrder] = await db
+          .select()
+          .from(workOrders)
+          .where(eq(workOrders.id, input.workOrderId))
+          .limit(1);
+        if (!workOrder || workOrder.weekId !== input.weekId)
+          throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
+        if (!hasReservation(workOrder.sourceData))
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "OT sin reserva: no requiere clasificación logística de repuestos.",
+          });
         const warehouseCodes = uniqueCodes(input.warehouseCodes);
         const validationMessage = validateReceptionInput(input.status, warehouseCodes);
         if (validationMessage) throw new TRPCError({ code: "BAD_REQUEST", message: validationMessage });
@@ -371,7 +392,12 @@ export const appRouter = router({
         if (input.fromGuard === input.toGuard) throw new TRPCError({ code: "BAD_REQUEST", message: "La guardia que entrega y recibe deben ser diferentes." });
         const db = await requireDb();
         const dashboard = await getDashboardData(input.weekId, input.fromGuard);
-        const pendingRows = dashboard.rows.filter(row => row.state && (row.state.status === "PARCIAL" || row.state.status === "FALTA_RECIBIR"));
+        const pendingRows = dashboard.rows.filter(
+          row =>
+            hasReservation(row.workOrder.sourceData) &&
+            row.state &&
+            (row.state.status === "PARCIAL" || row.state.status === "FALTA_RECIBIR")
+        );
         return db.transaction(async tx => {
           const [already] = await tx.select().from(handovers).where(and(eq(handovers.weekId, input.weekId), eq(handovers.fromGuard, input.fromGuard), eq(handovers.toGuard, input.toGuard), inArray(handovers.status, ["ENVIADO", "CONFIRMADO"]))).limit(1);
           if (already) throw new TRPCError({ code: "CONFLICT", message: "Este relevo ya fue generado o confirmado." });
@@ -456,6 +482,28 @@ export const appRouter = router({
           }
         }
         return getGuardRelations();
+      }),
+
+    listUsers: adminProcedure.query(async () => {
+      const db = await requireDb();
+      return db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          role: users.role,
+          lastSignedIn: users.lastSignedIn,
+        })
+        .from(users)
+        .orderBy(desc(users.lastSignedIn));
+    }),
+
+    updateUserRole: adminProcedure
+      .input(z.object({ userId: z.number().int().positive(), role: managedRoleSchema }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId));
+        return { success: true };
       }),
   }),
 });

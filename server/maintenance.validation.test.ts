@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   calculateReceptionPercent,
   getPendingWarehouseLabel,
+  getReservationValue,
+  hasReservation,
   validateReceptionInput,
 } from "@shared/maintenance";
 
@@ -35,5 +37,13 @@ describe("maintenance business rules", () => {
     expect(calculateReceptionPercent(35, 22)).toBe(63);
     expect(calculateReceptionPercent(10, 15)).toBe(100);
     expect(calculateReceptionPercent(10, -2)).toBe(0);
+  });
+
+  it("detects real reservation numbers and excludes empty logistics records", () => {
+    expect(getReservationValue('{"RESERVA":"3157775"}')).toBe("3157775");
+    expect(hasReservation('{"Reserva":"3157775"}')).toBe(true);
+    expect(hasReservation('{"RESERVA":""}')).toBe(false);
+    expect(hasReservation('{"RESERVA":"0"}')).toBe(false);
+    expect(hasReservation(null)).toBe(false);
   });
 });
