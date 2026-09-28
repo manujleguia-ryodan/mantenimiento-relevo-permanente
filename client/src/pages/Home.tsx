@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ClipboardCheck,
   Clock3,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
   Filter,
   HardHat,
@@ -217,6 +219,7 @@ export default function Home() {
         ? "Visualizador"
         : "Supervisor";
   const [pin, setPin] = useState("");
+  const [showLoginPin, setShowLoginPin] = useState(false);
   const [pinLoginError, setPinLoginError] = useState<string | null>(null);
   const [selectedWeekId, setSelectedWeekId] = useState<number | null>(null);
   const [guard, setGuard] = useState<Guard>("A");
@@ -239,6 +242,7 @@ export default function Home() {
   const [equipmentSearch, setEquipmentSearch] = useState("");
   const [newAccessLabel, setNewAccessLabel] = useState("");
   const [newAccessPin, setNewAccessPin] = useState("");
+  const [showNewAccessPin, setShowNewAccessPin] = useState(false);
   const [newAccessRole, setNewAccessRole] = useState<"facilitator" | "supervisor">("supervisor");
   const [relationsDraft, setRelationsDraft] = useState<
     Record<Guard, Guard | "">
@@ -729,18 +733,29 @@ export default function Home() {
                   pinLoginMutation.mutate({ pin });
                 }}
               >
-                <input
-                  aria-label="PIN o código de acceso"
-                  autoComplete="current-password"
-                  className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#121a1c] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/20 disabled:opacity-60"
-                  maxLength={128}
-                  minLength={8}
-                  onChange={event => setPin(event.target.value)}
-                  placeholder="PIN o código de acceso"
-                  required
-                  type="password"
-                  value={pin}
-                />
+                <div className="relative min-w-0 flex-1">
+                  <input
+                    aria-label="PIN o código de acceso"
+                    autoComplete="current-password"
+                    className="w-full rounded-xl border border-white/10 bg-[#121a1c] px-4 py-3 pr-12 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/20 disabled:opacity-60"
+                    maxLength={128}
+                    minLength={8}
+                    onChange={event => setPin(event.target.value)}
+                    placeholder="PIN o código de acceso"
+                    required
+                    type={showLoginPin ? "text" : "password"}
+                    value={pin}
+                  />
+                  <button
+                    type="button"
+                    aria-label={showLoginPin ? "Ocultar PIN" : "Mostrar PIN"}
+                    title={showLoginPin ? "Ocultar PIN" : "Mostrar PIN"}
+                    onClick={() => setShowLoginPin(current => !current)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-amber-200"
+                  >
+                    {showLoginPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 <button
                   className="inline-flex items-center justify-center gap-3 rounded-xl bg-amber-300 px-5 py-3 text-sm font-bold text-[#0a0f10] shadow-[0_10px_35px_rgba(245,185,66,0.22)] transition hover:bg-amber-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={pinLoginMutation.isPending || pin.length < 8}
@@ -2115,13 +2130,24 @@ export default function Home() {
                     placeholder="Nombre del usuario"
                     className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none focus:border-amber-300/40"
                   />
-                  <input
-                    value={newAccessPin}
-                    onChange={event => setNewAccessPin(event.target.value)}
-                    placeholder="PIN mínimo 8 caracteres"
-                    type="password"
-                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none focus:border-amber-300/40"
-                  />
+                  <div className="relative">
+                    <input
+                      value={newAccessPin}
+                      onChange={event => setNewAccessPin(event.target.value)}
+                      placeholder="PIN mínimo 8 caracteres"
+                      type={showNewAccessPin ? "text" : "password"}
+                      className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#151e20] px-3 pr-10 text-sm text-white outline-none focus:border-amber-300/40"
+                    />
+                    <button
+                      type="button"
+                      aria-label={showNewAccessPin ? "Ocultar PIN" : "Mostrar PIN"}
+                      title={showNewAccessPin ? "Ocultar PIN" : "Mostrar PIN"}
+                      onClick={() => setShowNewAccessPin(current => !current)}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:bg-white/5 hover:text-amber-200"
+                    >
+                      {showNewAccessPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <select
                     value={newAccessRole}
                     onChange={event => setNewAccessRole(event.target.value as "facilitator" | "supervisor")}
