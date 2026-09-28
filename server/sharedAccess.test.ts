@@ -172,6 +172,16 @@ describe("shared PIN access", () => {
           rows: [{ otNumber: "1", equipmentCode: "CA01" }],
         })
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      if (role === "viewer") {
+        await expect(
+          caller.maintenance.markOperationalExecution({
+            workOrderId: 1,
+            weekId: 1,
+            guard: "A",
+            closed: true,
+          })
+        ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      }
     }
   );
 });

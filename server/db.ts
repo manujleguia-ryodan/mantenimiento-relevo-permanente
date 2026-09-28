@@ -2,7 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser, equipment, guardAssignments, guardRelations, handoverItems, handovers,
-  maintenanceWeeks, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
+  maintenanceWeeks, otExecutions, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { hasReservation } from "../shared/maintenance";
@@ -40,9 +40,10 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
   const selectedIds = selected
     .map(item => item.equipmentId)
     .filter((id): id is number => Number.isSafeInteger(id) && id > 0);
-  const rows = await db.select({ workOrder: workOrders, equipment, state: otStates, inheritedFrom: handovers.fromGuard })
+  const rows = await db.select({ workOrder: workOrders, equipment, state: otStates, execution: otExecutions, inheritedFrom: handovers.fromGuard })
     .from(workOrders).leftJoin(equipment, eq(workOrders.equipmentId, equipment.id))
     .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId), eq(otStates.guard, guard)))
+    .leftJoin(otExecutions, and(eq(otExecutions.workOrderId, workOrders.id), eq(otExecutions.weekId, weekId), eq(otExecutions.guard, guard)))
     .leftJoin(handovers, eq(otStates.inheritedFromHandoverId, handovers.id)).where(eq(workOrders.weekId, weekId));
   const visibleRows = selectedIds.length ? rows.filter(row => selectedIds.includes(row.workOrder.equipmentId)) : [];
   const stateIds = visibleRows.map(row => row.state?.id).filter((id): id is number => Boolean(id));

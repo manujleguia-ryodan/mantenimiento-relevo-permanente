@@ -9,6 +9,7 @@ import {
   handoverItems,
   handovers,
   maintenanceWeeks,
+  otExecutions,
   otHistory,
   otStatePendingWarehouses,
   otStates,
@@ -82,6 +83,15 @@ const facilitatorProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Se requiere perfil Facilitador o Administrador.",
+    });
+  return next({ ctx });
+});
+
+const operationalProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role === "viewer")
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "El perfil Visualizador no puede modificar OTs.",
     });
   return next({ ctx });
 });
@@ -380,6 +390,46 @@ export const appRouter = router({
           await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: existing?.status || null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user.id, actorName: ctx.user.name || ctx.user.email || "Usuario actual" });
         });
         return { success: true, stateId: stateId! };
+      }),
+
+    markOperationalExecution: operationalProcedure
+      .input(
+        z.object({
+          workOrderId: z.number().int().positive(),
+          weekId: z.number().int().positive(),
+          guard: guardSchema,
+          closed: z.boolean(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const [workOrder] = await db
+          .select()
+          .from(workOrders)
+          .where(eq(workOrders.id, input.workOrderId))
+          .limit(1);
+        if (!workOrder || workOrder.weekId !== input.weekId)
+          throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
+        const status = input.closed ? "CERRADA_NOTIFICADA" : "ABIERTA";
+        const values = {
+          status,
+          executedById: ctx.user.id,
+          executedByName: ctx.user.name || ctx.user.email || "Usuario actual",
+          executedAt: new Date(),
+        } as const;
+        const [existing] = await db
+          .select()
+          .from(otExecutions)
+          .where(and(eq(otExecutions.workOrderId, input.workOrderId), eq(otExecutions.weekId, input.weekId), eq(otExecutions.guard, input.guard)))
+          .limit(1);
+        if (existing) await db.update(otExecutions).set(values).where(eq(otExecutions.id, existing.id));
+        else await db.insert(otExecutions).values({
+          workOrderId: input.workOrderId,
+          weekId: input.weekId,
+          guard: input.guard,
+          ...values,
+        });
+        return { success: true, status };
       }),
 
     history: sharedAccessProcedure

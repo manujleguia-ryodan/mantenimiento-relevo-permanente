@@ -51,6 +51,15 @@ export const workOrders = mysqlTable("workOrders", {
   weekIdx: index("workOrders_week_idx").on(table.weekId), equipmentIdx: index("workOrders_equipment_idx").on(table.equipmentId),
 }));
 
+export const otExecutions = mysqlTable("otExecutions", {
+  id: int("id").autoincrement().primaryKey(), workOrderId: int("workOrderId").notNull(), weekId: int("weekId").notNull(),
+  guard: mysqlEnum("guard", ["A", "B", "C", "D"]).notNull(), status: mysqlEnum("status", ["ABIERTA", "CERRADA_NOTIFICADA"]).default("ABIERTA").notNull(),
+  executedById: int("executedById"), executedByName: varchar("executedByName", { length: 160 }), executedAt: timestamp("executedAt").defaultNow().onUpdateNow().notNull(), note: text("note"),
+}, table => ({
+  executionUnique: uniqueIndex("otExecutions_unique").on(table.workOrderId, table.weekId, table.guard),
+  executionLookupIdx: index("otExecutions_lookup_idx").on(table.weekId, table.guard, table.status),
+}));
+
 export const guardAssignments = mysqlTable("guardAssignments", {
   id: int("id").autoincrement().primaryKey(), weekId: int("weekId").notNull(),
   guard: mysqlEnum("guard", ["A", "B", "C", "D"]).notNull(), equipmentId: int("equipmentId").notNull(),
@@ -117,4 +126,5 @@ export type MaintenanceWeek = typeof maintenanceWeeks.$inferSelect;
 export type Equipment = typeof equipment.$inferSelect;
 export type Warehouse = typeof warehouses.$inferSelect;
 export type WorkOrder = typeof workOrders.$inferSelect;
+export type OtExecution = typeof otExecutions.$inferSelect;
 export type OtState = typeof otStates.$inferSelect;

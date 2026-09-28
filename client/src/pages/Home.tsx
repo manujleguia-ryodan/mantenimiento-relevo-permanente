@@ -316,6 +316,17 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const executionMutation = trpc.maintenance.markOperationalExecution.useMutation({
+    onSuccess: result => {
+      toast.success(
+        result.status === "CERRADA_NOTIFICADA"
+          ? "OT cerrada y notificada."
+          : "OT reabierta para ejecución."
+      );
+      void utils.maintenance.dashboard.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
   const handoverMutation = trpc.maintenance.generateHandover.useMutation({
     onSuccess: result => {
       setHandoverId(result.handoverId);
@@ -1385,6 +1396,24 @@ export default function Home() {
                                 {formatDate(row.state?.updatedAt)}
                               </td>
                               <td className="whitespace-nowrap px-4 py-4 text-right">
+                                {!isViewer && selectedWeekId && (
+                                  <button
+                                    onClick={() =>
+                                      executionMutation.mutate({
+                                        workOrderId: row.workOrder.id,
+                                        weekId: selectedWeekId,
+                                        guard,
+                                        closed: row.execution?.status !== "CERRADA_NOTIFICADA",
+                                      })
+                                    }
+                                    disabled={executionMutation.isPending}
+                                    className={`mr-2 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition disabled:opacity-40 ${row.execution?.status === "CERRADA_NOTIFICADA" ? "border-emerald-400/25 text-emerald-300 hover:bg-emerald-400/10" : "border-white/[0.08] text-slate-400 hover:border-emerald-300/30 hover:text-emerald-200"}`}
+                                  >
+                                    {row.execution?.status === "CERRADA_NOTIFICADA"
+                                      ? "Reabrir OT"
+                                      : "Cerrar y notificar"}
+                                  </button>
+                                )}
                                 {isFacilitator && requiresLogistics && (
                                   <button
                                     onClick={() => openEdit(row)}
