@@ -49,6 +49,30 @@ import { toast } from "sonner";
 
 type Guard = "A" | "B" | "C" | "D";
 type Status = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RECIBIR";
+type CorrectiveDraft = { otNumber: string; equipmentCode: string; reservation: string; description: string };
+
+function parseCorrectiveLines(value: string) {
+  const rows: CorrectiveDraft[] = [];
+  const invalid: string[] = [];
+  for (const rawLine of value.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) {
+    const ot = rawLine.match(/^OT\s+(\S+)/i);
+    const reservation = rawLine.match(/\bR\s+(\S+)/i);
+    const equipment = rawLine.match(/\b([A-Z]{1,6}\d{1,4})\s*$/i);
+    if (!ot || !reservation || !equipment) {
+      invalid.push(rawLine);
+      continue;
+    }
+    const start = (reservation.index ?? 0) + reservation[0].length;
+    const end = equipment.index ?? rawLine.length;
+    const description = rawLine.slice(start, end).replace(/^\s*(?:CR\s+)?/i, "").trim();
+    if (!description) {
+      invalid.push(rawLine);
+      continue;
+    }
+    rows.push({ otNumber: ot[1], reservation: reservation[1], equipmentCode: equipment[1].toUpperCase(), description });
+  }
+  return { rows, invalid };
+}
 
 const GUARDS: Guard[] = ["A", "B", "C", "D"];
 const GUARD_LABEL: Record<Guard, string> = { A: "1", B: "2", C: "3", D: "4" };
@@ -249,6 +273,9 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showCorrectiveOt, setShowCorrectiveOt] = useState(false);
+  const [bulkCorrectiveMode, setBulkCorrectiveMode] = useState(false);
+  const [bulkCorrectiveText, setBulkCorrectiveText] = useState("");
+  const [bulkCorrectivePreview, setBulkCorrectivePreview] = useState<{ rows: CorrectiveDraft[]; invalid: string[] }>({ rows: [], invalid: [] });
   const [editingCorrective, setEditingCorrective] = useState<{
     id: number;
     otNumber: string;
@@ -353,6 +380,17 @@ export default function Home() {
       setCorrectiveEquipment("");
       setCorrectiveReservation("");
       setCorrectiveDescription("");
+      void utils.maintenance.dashboard.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const createCorrectiveOtsMutation = trpc.maintenance.createCorrectiveOts.useMutation({
+    onSuccess: result => {
+      toast.success(`${result.created} OT correctivas creadas${result.duplicates ? ` · ${result.duplicates} repetidas omitidas` : ""}.`);
+      setShowCorrectiveOt(false);
+      setBulkCorrectiveMode(false);
+      setBulkCorrectiveText("");
+      setBulkCorrectivePreview({ rows: [], invalid: [] });
       void utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
@@ -1780,23 +1818,34 @@ export default function Home() {
               onSubmit={event => {
                 event.preventDefault();
                 if (!selectedWeekId) return toast.error("Selecciona una semana antes de crear la OT.");
-                createCorrectiveOtMutation.mutate({
-                  weekId: selectedWeekId,
-                  guard,
-                  otNumber: correctiveOtNumber,
-                  equipmentCode: correctiveEquipment,
-                  reservation: correctiveReservation || undefined,
-                  description: correctiveDescription,
-                });
+                if (bulkCorrectiveMode) {
+                  if (!bulkCorrectivePreview.rows.length) return toast.error("Pega al menos una línea válida.");
+                  createCorrectiveOtsMutation.mutate({ weekId: selectedWeekId, guard, rows: bulkCorrectivePreview.rows });
+                } else {
+                  createCorrectiveOtMutation.mutate({ weekId: selectedWeekId, guard, otNumber: correctiveOtNumber, equipmentCode: correctiveEquipment, reservation: correctiveReservation || undefined, description: correctiveDescription });
+                }
               }}
             >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="text-xs text-slate-400">OT<input required value={correctiveOtNumber} onChange={event => setCorrectiveOtNumber(event.target.value)} placeholder="Ej. 69001234" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
-                <label className="text-xs text-slate-400">Equipo<input required value={correctiveEquipment} onChange={event => setCorrectiveEquipment(event.target.value)} placeholder="Ej. CA13 o CR02" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+              <div className="flex rounded-xl bg-white/[0.04] p-1">
+                <button type="button" onClick={() => setBulkCorrectiveMode(false)} className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold ${!bulkCorrectiveMode ? "bg-sky-300 text-[#071014]" : "text-slate-400"}`}>Una OT</button>
+                <button type="button" onClick={() => setBulkCorrectiveMode(true)} className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold ${bulkCorrectiveMode ? "bg-sky-300 text-[#071014]" : "text-slate-400"}`}>Pegar varias OT</button>
               </div>
-              <label className="text-xs text-slate-400">Reserva <span className="text-slate-600">(opcional)</span><input value={correctiveReservation} onChange={event => setCorrectiveReservation(event.target.value)} placeholder="Código de reserva o dejar vacío" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
-              <label className="text-xs text-slate-400">Descripción de operación<textarea required value={correctiveDescription} onChange={event => setCorrectiveDescription(event.target.value)} placeholder="Describe el trabajo correctivo" rows={3} className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-sm text-white outline-none focus:border-sky-300/40" /></label>
-              <div className="flex justify-end gap-2 pt-1"><button type="button" onClick={() => setShowCorrectiveOt(false)} className="rounded-xl px-4 py-2.5 text-sm text-slate-400 hover:bg-white/5">Cancelar</button><button type="submit" disabled={createCorrectiveOtMutation.isPending} className="rounded-xl bg-sky-300 px-4 py-2.5 text-sm font-bold text-[#071014] disabled:opacity-50">{createCorrectiveOtMutation.isPending ? "Guardando…" : "Crear OT"}</button></div>
+              {!bulkCorrectiveMode ? <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs text-slate-400">OT<input required value={correctiveOtNumber} onChange={event => setCorrectiveOtNumber(event.target.value)} placeholder="Ej. 69001234" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+                  <label className="text-xs text-slate-400">Equipo<input required value={correctiveEquipment} onChange={event => setCorrectiveEquipment(event.target.value)} placeholder="Ej. CA13 o CR02" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+                </div>
+                <label className="text-xs text-slate-400">Reserva <span className="text-slate-600">(opcional)</span><input value={correctiveReservation} onChange={event => setCorrectiveReservation(event.target.value)} placeholder="Código de reserva o dejar vacío" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+                <label className="text-xs text-slate-400">Descripción de operación<textarea required value={correctiveDescription} onChange={event => setCorrectiveDescription(event.target.value)} placeholder="Describe el trabajo correctivo" rows={3} className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+              </> : <>
+                <label className="text-xs text-slate-400">Pega una OT por línea<textarea autoFocus value={bulkCorrectiveText} onChange={event => { const value = event.target.value; setBulkCorrectiveText(value); setBulkCorrectivePreview(parseCorrectiveLines(value)); }} placeholder={'OT 6831949 R 3424500 CR CAMBIO DE FILTRO DE FRENO CR02\nOT 6831958 R 3424542 CR CAMBIO DE CLIP DE TUBERIA DE DIRECCION CF02'} rows={7} className="mt-2 w-full resize-y rounded-xl border border-sky-300/20 bg-white/[0.035] px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-300/40" /></label>
+                <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-3 text-xs">
+                  <div className="font-semibold text-emerald-300">{bulkCorrectivePreview.rows.length} líneas listas para crear</div>
+                  {bulkCorrectivePreview.invalid.length > 0 && <div className="mt-1 text-amber-300">{bulkCorrectivePreview.invalid.length} líneas no reconocidas; serán omitidas.</div>}
+                  {bulkCorrectivePreview.rows.slice(0, 3).map(row => <div key={row.otNumber} className="mt-2 truncate text-slate-400"><span className="font-mono text-white">{row.otNumber}</span> · {row.reservation} · {row.equipmentCode} · {row.description}</div>)}
+                </div>
+              </>}
+              <div className="flex justify-end gap-2 pt-1"><button type="button" onClick={() => setShowCorrectiveOt(false)} className="rounded-xl px-4 py-2.5 text-sm text-slate-400 hover:bg-white/5">Cancelar</button><button type="submit" disabled={createCorrectiveOtMutation.isPending || createCorrectiveOtsMutation.isPending} className="rounded-xl bg-sky-300 px-4 py-2.5 text-sm font-bold text-[#071014] disabled:opacity-50">{createCorrectiveOtMutation.isPending || createCorrectiveOtsMutation.isPending ? "Guardando…" : bulkCorrectiveMode ? `Crear ${bulkCorrectivePreview.rows.length} OT` : "Crear OT"}</button></div>
             </form>
           </div>
         </div>

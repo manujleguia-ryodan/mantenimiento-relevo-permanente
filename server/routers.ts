@@ -414,6 +414,47 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    createCorrectiveOts: facilitatorProcedure
+      .input(z.object({
+        weekId: z.number().int().positive(),
+        guard: guardSchema,
+        rows: z.array(z.object({
+          otNumber: z.string().trim().min(1).max(80),
+          equipmentCode: z.string().trim().min(1).max(80),
+          reservation: z.string().trim().max(160).optional(),
+          description: z.string().trim().min(1).max(10000),
+        })).min(1).max(200),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const equipmentCache = new Map<string, number>();
+        let created = 0;
+        let duplicates = 0;
+        for (const row of input.rows) {
+          const [duplicate] = await db.select({ id: workOrders.id }).from(workOrders)
+            .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.otNumber, row.otNumber))).limit(1);
+          if (duplicate) { duplicates += 1; continue; }
+          const code = row.equipmentCode.toUpperCase();
+          let equipmentId = equipmentCache.get(code);
+          if (!equipmentId) {
+            const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, code)).limit(1);
+            equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code }));
+            equipmentCache.set(code, equipmentId);
+          }
+          await db.insert(workOrders).values({
+            weekId: input.weekId,
+            otNumber: row.otNumber,
+            equipmentId,
+            description: row.description,
+            sourceData: JSON.stringify({ Reserva: row.reservation ?? "", "Descripción de operación": row.description, Tipo: "Correctiva" }),
+          });
+          const [assignment] = await db.select({ id: guardAssignments.id }).from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.guard), eq(guardAssignments.equipmentId, equipmentId))).limit(1);
+          if (!assignment) await db.insert(guardAssignments).values({ weekId: input.weekId, guard: input.guard, equipmentId, selectedById: ctx.user.id });
+          created += 1;
+        }
+        return { success: true, created, duplicates };
+      }),
+
     cancelCorrectiveOt: facilitatorProcedure
       .input(z.object({ workOrderId: z.number().int().positive(), reason: z.string().trim().max(500).optional() }))
       .mutation(async ({ input, ctx }) => {
