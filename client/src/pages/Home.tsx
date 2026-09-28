@@ -340,9 +340,29 @@ export default function Home() {
   const excelColumns = useMemo(() => {
     const first = rows.find(row => row.workOrder.sourceData)?.workOrder
       .sourceData;
-    return Object.keys(getImportedFields(first)).filter(
+    const available = Object.keys(getImportedFields(first)).filter(
       key => !isPrimaryExcelColumn(key)
     );
+    const preferred = [
+      ["reserva"],
+      ["descripciondeoperacion", "descripcionoperacion"],
+    ];
+    const selected: string[] = [];
+    for (const aliases of preferred) {
+      const match = available.find(key => {
+        const normalized = normalizeExcelHeader(key);
+        return aliases.some(alias => normalized === alias || normalized.includes(alias));
+      });
+      if (match && !selected.includes(match)) selected.push(match);
+    }
+    if (selected.length < preferred.length) {
+      selected.push(
+        ...available
+          .filter(key => !selected.includes(key))
+          .slice(0, preferred.length - selected.length)
+      );
+    }
+    return selected;
   }, [rows]);
   const importPreviewColumns = importPreview
     ? Object.keys(importPreview.rows[0]?.extra ?? {}).filter(
@@ -1152,8 +1172,7 @@ export default function Home() {
                         OT de la guardia {guard}
                       </h2>
                       <p className="mt-1 text-xs text-slate-500">
-                        Incluye las columnas del programa semanal; desliza la
-                        tabla horizontalmente para verlas.
+                        OT, equipo, reserva y descripción de operación.
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row">
@@ -1201,17 +1220,21 @@ export default function Home() {
                       <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-600">
                         <tr>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
-                            OT / Equipo
+                            OT
                           </th>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
-                            Descripción OT
+                            Equipo
                           </th>
                           {excelColumns.map(column => (
                             <th
                               key={column}
                               className="whitespace-nowrap px-3 py-3 font-bold"
                             >
-                              {column}
+                              {normalizeExcelHeader(column).includes("reserva")
+                                ? "Reserva"
+                                : normalizeExcelHeader(column).includes("operacion")
+                                  ? "Descripción de operación"
+                                  : column}
                             </th>
                           ))}
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
@@ -1250,25 +1273,11 @@ export default function Home() {
                               key={row.workOrder.id}
                               className="group transition hover:bg-white/[0.025]"
                             >
-                              <td className="whitespace-nowrap px-4 py-4">
-                                <div className="font-mono text-sm font-semibold text-white">
-                                  {row.workOrder.otNumber}
-                                </div>
-                                <div className="mt-1 text-xs text-amber-200/75">
-                                  {row.equipment?.code ?? "—"}
-                                </div>
+                              <td className="whitespace-nowrap px-4 py-4 font-mono text-sm font-semibold text-white">
+                                {row.workOrder.otNumber}
                               </td>
-                              <td className="max-w-[260px] px-4 py-4 text-sm text-slate-400">
-                                <div
-                                  className="truncate"
-                                  title={
-                                    row.workOrder.description ||
-                                    "Sin descripción"
-                                  }
-                                >
-                                  {row.workOrder.description ||
-                                    "Sin descripción"}
-                                </div>
+                              <td className="whitespace-nowrap px-4 py-4 text-sm text-amber-200/85">
+                                {row.equipment?.code ?? "—"}
                               </td>
                               {excelColumns.map(column => {
                                 const value = formatImportedCell(
