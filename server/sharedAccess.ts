@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { parse as parseCookie } from "cookie";
 import type { Request } from "express";
 import type { User } from "../drizzle/schema";
@@ -35,9 +35,10 @@ function signature(payload: string, secret: string) {
 
 export function createSharedAccessToken(
   secret: string,
-  expiresAt = Date.now() + SHARED_ACCESS_TTL_MS
+  expiresAt = Date.now() + SHARED_ACCESS_TTL_MS,
+  role: SharedAccessRole = "admin"
 ) {
-  const payload = String(expiresAt);
+  const payload = `${expiresAt}|${role}`;
   return `${payload}.${signature(payload, secret)}`;
 }
 
@@ -51,8 +52,9 @@ export function verifySharedAccessToken(
   if (separator <= 0) return false;
   const payload = token.slice(0, separator);
   const suppliedSignature = token.slice(separator + 1);
-  if (!/^\d+$/.test(payload) || !suppliedSignature) return false;
-  const expiresAt = Number(payload);
+  const [expiresAtText] = payload.split("|");
+  if (!/^\d+$/.test(expiresAtText) || !suppliedSignature) return false;
+  const expiresAt = Number(expiresAtText);
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return false;
 
   const expectedSignature = signature(payload, secret);
@@ -73,18 +75,60 @@ export function hasSharedAccess(req: Pick<Request, "headers">) {
   return verifySharedAccessToken(token, process.env.JWT_SECRET);
 }
 
-export function createSharedAccessUser(now = new Date()): User {
+export function getSharedAccessRole(
+  req: Pick<Request, "headers">
+): SharedAccessRole {
+  const rawCookieHeader = req.headers.cookie;
+  const cookieHeader = Array.isArray(rawCookieHeader)
+    ? rawCookieHeader.join(";")
+    : (rawCookieHeader ?? "");
+  const token = parseCookie(cookieHeader)[SHARED_ACCESS_COOKIE];
+  if (!token || !verifySharedAccessToken(token, process.env.JWT_SECRET)) return "admin";
+  const payload = token.slice(0, token.lastIndexOf("."));
+  const role = payload.split("|")[1];
+  return role === "facilitator" || role === "supervisor" ? role : "admin";
+}
+
+export type SharedAccessRole = "admin" | "facilitator" | "supervisor";
+
+export function createSharedAccessUser(
+  role: SharedAccessRole = "admin",
+  now = new Date()
+): User {
   return {
     id: 0,
     openId: "shared-pin-access",
     name: "Acceso compartido",
     email: null,
     loginMethod: "shared-pin",
-    role: "admin",
+    role,
     createdAt: now,
     updatedAt: now,
     lastSignedIn: now,
   };
+}
+
+export function hashAccessCode(
+  code: string,
+  salt = randomBytes(16).toString("hex")
+) {
+  return {
+    salt,
+    hash: createHash("sha256").update(`${salt}:${code}`).digest("hex"),
+  };
+}
+
+export function matchesAccessCode(
+  code: string,
+  salt: string,
+  expectedHash: string
+) {
+  const actualBytes = Buffer.from(hashAccessCode(code, salt).hash, "hex");
+  const expectedBytes = Buffer.from(expectedHash, "hex");
+  return (
+    actualBytes.length === expectedBytes.length &&
+    timingSafeEqual(actualBytes, expectedBytes)
+  );
 }
 
 export function canAttemptSharedPin(ip: string, now = Date.now()) {

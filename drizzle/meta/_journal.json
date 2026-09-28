@@ -36,6 +36,13 @@
       "when": 1790607549916,
       "tag": "0004_faulty_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1790608462971,
+      "tag": "0005_dusty_champions",
+      "breakpoints": true
     }
   ]
 }

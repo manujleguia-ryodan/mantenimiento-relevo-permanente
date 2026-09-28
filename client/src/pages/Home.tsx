@@ -236,6 +236,10 @@ export default function Home() {
   const [selectedEquipmentIds, setSelectedEquipmentIds] = useState<number[]>(
     []
   );
+  const [equipmentSearch, setEquipmentSearch] = useState("");
+  const [newAccessLabel, setNewAccessLabel] = useState("");
+  const [newAccessPin, setNewAccessPin] = useState("");
+  const [newAccessRole, setNewAccessRole] = useState<"facilitator" | "supervisor">("supervisor");
   const [relationsDraft, setRelationsDraft] = useState<
     Record<Guard, Guard | "">
   >({ A: "", B: "", C: "", D: "" });
@@ -285,6 +289,9 @@ export default function Home() {
     { enabled: Boolean(showHistory && editingRow?.workOrder?.id) }
   );
   const accessUsers = trpc.maintenance.listUsers.useQuery(undefined, {
+    enabled: Boolean(isAdmin && showAccessManagement),
+  });
+  const accessCodes = trpc.maintenance.listAccessCodes.useQuery(undefined, {
     enabled: Boolean(isAdmin && showAccessManagement),
   });
 
@@ -363,10 +370,32 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const createAccessCodeMutation = trpc.maintenance.createAccessCode.useMutation({
+    onSuccess: () => {
+      toast.success("Usuario y PIN creados.");
+      setNewAccessLabel("");
+      setNewAccessPin("");
+      void accessCodes.refetch();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const revokeAccessCodeMutation = trpc.maintenance.revokeAccessCode.useMutation({
+    onSuccess: () => {
+      toast.success("Acceso desactivado.");
+      void accessCodes.refetch();
+    },
+    onError: error => toast.error(error.message),
+  });
 
   const weeks = bootstrap.data?.weeks ?? [];
   const allEquipment =
     dashboard.data?.allEquipment ?? bootstrap.data?.equipment ?? [];
+  const filteredEquipment = useMemo(() => {
+    const query = equipmentSearch.trim().toLowerCase();
+    return allEquipment.filter(item =>
+      !query || `${item.code} ${item.description ?? ""}`.toLowerCase().includes(query)
+    );
+  }, [allEquipment, equipmentSearch]);
   const rows = dashboard.data?.rows ?? [];
   const excelColumns = useMemo(() => {
     const first = rows.find(row => row.workOrder.sourceData)?.workOrder
@@ -601,6 +630,18 @@ export default function Home() {
       });
   }
 
+  function setFilteredEquipmentSelected(selected: boolean) {
+    if (!isFacilitator || !selectedWeekId) return;
+    const visibleIds = filteredEquipment
+      .map(item => item.id)
+      .filter(id => Number.isSafeInteger(id) && id > 0);
+    const next = selected
+      ? Array.from(new Set([...selectedEquipmentIds, ...visibleIds]))
+      : selectedEquipmentIds.filter(id => !visibleIds.includes(id));
+    setSelectedEquipmentIds(next);
+    assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
+  }
+
   function submitReception() {
     if (!editingRow || !selectedWeekId) return;
     if (!isFacilitator) {
@@ -677,8 +718,8 @@ export default function Home() {
               <p className="mt-7 max-w-xl text-base leading-7 text-slate-400">
                 Una capa rápida sobre SAP para importar la semana, revisar la
                 recepción global de repuestos y entregar pendientes con
-                trazabilidad. Ingresa con el PIN compartido del equipo; no se
-                requiere correo.
+                trazabilidad. El Administrador crea un PIN para cada Facilitador
+                o Supervisor; no se requiere correo.
               </p>
               <form
                 className="mt-9 flex max-w-xl flex-col gap-3 sm:flex-row"
@@ -689,13 +730,13 @@ export default function Home() {
                 }}
               >
                 <input
-                  aria-label="PIN compartido"
+                  aria-label="PIN o código de acceso"
                   autoComplete="current-password"
                   className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#121a1c] px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/20 disabled:opacity-60"
                   maxLength={128}
                   minLength={8}
                   onChange={event => setPin(event.target.value)}
-                  placeholder="PIN compartido"
+                  placeholder="PIN o código de acceso"
                   required
                   type="password"
                   value={pin}
@@ -1202,7 +1243,36 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-                    {allEquipment.map(item => (
+                    <div className="col-span-full flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 sm:flex-row sm:items-center">
+                      <div className="flex flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-[#0d1314] px-3 py-2">
+                        <Search className="h-4 w-4 text-slate-500" />
+                        <input
+                          value={equipmentSearch}
+                          onChange={event => setEquipmentSearch(event.target.value)}
+                          placeholder="Buscar equipo por código o descripción..."
+                          className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-600"
+                        />
+                      </div>
+                      {isFacilitator && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setFilteredEquipmentSelected(true)}
+                            disabled={!filteredEquipment.length || assignmentMutation.isPending}
+                            className="rounded-lg border border-emerald-400/20 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-400/10 disabled:opacity-40"
+                          >
+                            Seleccionar visibles
+                          </button>
+                          <button
+                            onClick={() => setFilteredEquipmentSelected(false)}
+                            disabled={!filteredEquipment.length || assignmentMutation.isPending}
+                            className="rounded-lg border border-rose-400/20 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-400/10 disabled:opacity-40"
+                          >
+                            Deseleccionar visibles
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {filteredEquipment.map(item => (
                       <button
                         key={item.id}
                         onClick={() => toggleEquipment(item.id)}
@@ -1224,6 +1294,11 @@ export default function Home() {
                         )}
                       </button>
                     ))}
+                    {!filteredEquipment.length && allEquipment.length > 0 && (
+                      <div className="col-span-full rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-500">
+                        No hay equipos que coincidan con la búsqueda.
+                      </div>
+                    )}
                     {!allEquipment.length && (
                       <div className="col-span-full rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-500">
                         Importa una semana para cargar equipos.
@@ -2004,7 +2079,7 @@ export default function Home() {
                   Gestionar accesos
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Asigna el nivel operativo de quienes ya iniciaron sesión en el sistema.
+                  Crea el usuario, define su PIN y entrégale el acceso de su página.
                 </p>
               </div>
               <button
@@ -2015,6 +2090,77 @@ export default function Home() {
               </button>
             </div>
             <div className="p-5">
+              <form
+                onSubmit={event => {
+                  event.preventDefault();
+                  if (newAccessPin.length < 8 || !newAccessLabel.trim()) {
+                    toast.error("Indica un nombre y un PIN de al menos 8 caracteres.");
+                    return;
+                  }
+                  createAccessCodeMutation.mutate({
+                    label: newAccessLabel.trim(),
+                    pin: newAccessPin,
+                    role: newAccessRole,
+                  });
+                }}
+                className="mb-5 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-4"
+              >
+                <div className="mb-3 text-xs font-bold uppercase tracking-[0.15em] text-amber-200">
+                  Crear usuario con PIN
+                </div>
+                <div className="grid gap-2 md:grid-cols-[1.1fr_1fr_0.9fr_auto]">
+                  <input
+                    value={newAccessLabel}
+                    onChange={event => setNewAccessLabel(event.target.value)}
+                    placeholder="Nombre del usuario"
+                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none focus:border-amber-300/40"
+                  />
+                  <input
+                    value={newAccessPin}
+                    onChange={event => setNewAccessPin(event.target.value)}
+                    placeholder="PIN mínimo 8 caracteres"
+                    type="password"
+                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none focus:border-amber-300/40"
+                  />
+                  <select
+                    value={newAccessRole}
+                    onChange={event => setNewAccessRole(event.target.value as "facilitator" | "supervisor")}
+                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none"
+                  >
+                    <option value="facilitator">Facilitador</option>
+                    <option value="supervisor">Supervisor</option>
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={createAccessCodeMutation.isPending}
+                    className="h-10 rounded-lg bg-amber-300 px-4 text-xs font-bold text-[#0a0f10] disabled:opacity-40"
+                  >
+                    Crear acceso
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  El PIN se guarda como hash; entrégaselo directamente al usuario y no se vuelve a mostrar en la lista.
+                </p>
+              </form>
+              <div className="mb-5 overflow-x-auto rounded-xl border border-white/[0.07]">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-500">
+                    <tr><th className="px-4 py-3">Usuario PIN</th><th className="px-4 py-3">Rol</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Último acceso</th><th className="px-4 py-3" /></tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.05]">
+                    {accessCodes.data?.map(code => (
+                      <tr key={code.id}>
+                        <td className="px-4 py-3 font-medium text-white">{code.label}</td>
+                        <td className="px-4 py-3 text-slate-300">{code.role === "facilitator" ? "Facilitador" : "Supervisor"}</td>
+                        <td className="px-4 py-3 text-xs">{code.active ? <span className="text-emerald-300">Activo</span> : <span className="text-slate-600">Desactivado</span>}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{formatDate(code.lastUsedAt)}</td>
+                        <td className="px-4 py-3 text-right">{code.active && <button onClick={() => revokeAccessCodeMutation.mutate({ id: code.id })} className="rounded-lg border border-rose-400/20 px-2.5 py-1.5 text-[11px] font-semibold text-rose-300 hover:bg-rose-400/10">Desactivar</button>}</td>
+                      </tr>
+                    ))}
+                    {!accessCodes.data?.length && <tr><td colSpan={5} className="px-4 py-6 text-center text-xs text-slate-500">Aún no hay usuarios con PIN creados.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
               <div className="overflow-x-auto rounded-xl border border-white/[0.07]">
                 <table className="w-full min-w-[620px] text-left text-sm">
                   <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-500">

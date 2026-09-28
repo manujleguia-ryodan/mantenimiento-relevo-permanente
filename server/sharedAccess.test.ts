@@ -5,10 +5,12 @@ import {
   canAttemptSharedPin,
   createSharedAccessToken,
   getConfiguredSharedPin,
+  hashAccessCode,
   MAX_FAILED_PIN_ATTEMPTS,
   PIN_ATTEMPT_WINDOW_MS,
   recordFailedSharedPinAttempt,
   SHARED_ACCESS_COOKIE,
+  matchesAccessCode,
   verifySharedAccessToken,
 } from "./sharedAccess";
 
@@ -76,6 +78,13 @@ describe("shared PIN access", () => {
     expect(verifySharedAccessToken(token, "different-secret", 1_000)).toBe(
       false
     );
+  });
+
+  it("hashes each managed PIN and verifies only the correct value", () => {
+    const access = hashAccessCode("supervisor-demo", "fixed-salt");
+    expect(access.hash).not.toContain("supervisor-demo");
+    expect(matchesAccessCode("supervisor-demo", access.salt, access.hash)).toBe(true);
+    expect(matchesAccessCode("wrong-code", access.salt, access.hash)).toBe(false);
   });
 
   it("limits repeated failed PIN attempts for one client", () => {

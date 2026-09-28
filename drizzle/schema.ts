@@ -21,6 +21,21 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const accessCodes = mysqlTable("accessCodes", {
+  id: int("id").autoincrement().primaryKey(),
+  label: varchar("label", { length: 120 }).notNull(),
+  role: mysqlEnum("role", ["facilitator", "supervisor"]).notNull(),
+  salt: varchar("salt", { length: 64 }).notNull(),
+  codeHash: varchar("codeHash", { length: 128 }).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdById: int("createdById"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  lastUsedAt: timestamp("lastUsedAt"),
+}, table => ({
+  codeHashUnique: uniqueIndex("accessCodes_hash_unique").on(table.codeHash),
+  activeRoleIdx: index("accessCodes_active_role_idx").on(table.active, table.role),
+}));
+
 export const maintenanceWeeks = mysqlTable("maintenanceWeeks", {
   id: int("id").autoincrement().primaryKey(), label: varchar("label", { length: 32 }).notNull(),
   weekNumber: int("weekNumber").notNull(), year: int("year").notNull(),

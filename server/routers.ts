@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import {
+  accessCodes,
   equipment,
   guardAssignments,
   guardRelations,
@@ -42,7 +43,10 @@ import {
   createSharedAccessToken,
   createSharedAccessUser,
   getConfiguredSharedPin,
+  getSharedAccessRole,
+  hashAccessCode,
   hasSharedAccess,
+  matchesAccessCode,
   matchesSharedPin,
   recordFailedSharedPinAttempt,
   SHARED_ACCESS_COOKIE,
@@ -61,7 +65,7 @@ const managedRoleSchema = z.enum(["admin", "facilitator", "supervisor", "viewer"
 
 const sharedAccessProcedure = publicProcedure.use(({ ctx, next }) => {
   const user =
-    ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser() : null);
+    ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req)) : null);
   if (!user)
     throw new TRPCError({
       code: "UNAUTHORIZED",
@@ -134,11 +138,11 @@ export const appRouter = router({
   auth: router({
     me: publicProcedure.query(
       ({ ctx }) =>
-        ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser() : null)
+        ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req)) : null)
     ),
     pinLogin: publicProcedure
       .input(z.object({ pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
-      .mutation(({ ctx, input }) => {
+      .mutation(async ({ ctx, input }) => {
         const configuredPin = getConfiguredSharedPin();
         const signingSecret = process.env.JWT_SECRET;
         if (!configuredPin || !signingSecret) {
@@ -157,25 +161,37 @@ export const appRouter = router({
               "Demasiados intentos. Espera 15 minutos antes de volver a probar.",
           });
         }
-        if (!matchesSharedPin(input.pin, configuredPin)) {
+        let accessRole: "admin" | "facilitator" | "supervisor" | null =
+          matchesSharedPin(input.pin, configuredPin) ? "admin" : null;
+        const db = await getDb();
+        if (!accessRole && db) {
+          const codes = await db.select().from(accessCodes).where(eq(accessCodes.active, true));
+          const matched = codes.find(code => matchesAccessCode(input.pin, code.salt, code.codeHash));
+          if (matched) {
+            accessRole = matched.role;
+            await db.update(accessCodes).set({ lastUsedAt: new Date() }).where(eq(accessCodes.id, matched.id));
+          }
+        }
+        if (!accessRole) {
           recordFailedSharedPinAttempt(ip);
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "PIN incorrecto.",
-          });
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Código de acceso incorrecto." });
         }
 
         clearFailedSharedPinAttempts(ip);
         ctx.res.cookie(
           SHARED_ACCESS_COOKIE,
-          createSharedAccessToken(signingSecret),
+          createSharedAccessToken(
+            signingSecret,
+            Date.now() + SHARED_ACCESS_TTL_MS,
+            accessRole
+          ),
           {
             ...getSessionCookieOptions(ctx.req),
             sameSite: "lax",
             maxAge: SHARED_ACCESS_TTL_MS,
           }
         );
-        return createSharedAccessUser();
+        return createSharedAccessUser(accessRole);
       }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
@@ -548,6 +564,31 @@ export const appRouter = router({
         .from(users)
         .orderBy(desc(users.lastSignedIn));
     }),
+
+    listAccessCodes: adminProcedure.query(async () => {
+      const db = await requireDb();
+      return db
+        .select({ id: accessCodes.id, label: accessCodes.label, role: accessCodes.role, active: accessCodes.active, createdAt: accessCodes.createdAt, lastUsedAt: accessCodes.lastUsedAt })
+        .from(accessCodes)
+        .orderBy(desc(accessCodes.createdAt));
+    }),
+
+    createAccessCode: adminProcedure
+      .input(z.object({ label: z.string().trim().min(2).max(120), role: z.enum(["facilitator", "supervisor"]), pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const { salt, hash } = hashAccessCode(input.pin);
+        const inserted = await db.insert(accessCodes).values({ label: input.label, role: input.role, salt, codeHash: hash, createdById: ctx.user.id });
+        return { success: true, id: insertId(inserted) };
+      }),
+
+    revokeAccessCode: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        await db.update(accessCodes).set({ active: false }).where(eq(accessCodes.id, input.id));
+        return { success: true };
+      }),
 
     updateUserRole: adminProcedure
       .input(z.object({ userId: z.number().int().positive(), role: managedRoleSchema }))
