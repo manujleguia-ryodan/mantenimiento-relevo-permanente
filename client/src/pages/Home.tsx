@@ -249,6 +249,13 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showCorrectiveOt, setShowCorrectiveOt] = useState(false);
+  const [editingCorrective, setEditingCorrective] = useState<{
+    id: number;
+    otNumber: string;
+    equipmentCode: string;
+    reservation: string;
+    description: string;
+  } | null>(null);
   const [correctiveOtNumber, setCorrectiveOtNumber] = useState("");
   const [correctiveEquipment, setCorrectiveEquipment] = useState("");
   const [correctiveReservation, setCorrectiveReservation] = useState("");
@@ -346,6 +353,21 @@ export default function Home() {
       setCorrectiveEquipment("");
       setCorrectiveReservation("");
       setCorrectiveDescription("");
+      void utils.maintenance.dashboard.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const updateCorrectiveOtMutation = trpc.maintenance.updateCorrectiveOt.useMutation({
+    onSuccess: () => {
+      toast.success("OT correctiva actualizada.");
+      setEditingCorrective(null);
+      void utils.maintenance.dashboard.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const cancelCorrectiveOtMutation = trpc.maintenance.cancelCorrectiveOt.useMutation({
+    onSuccess: () => {
+      toast.success("OT correctiva anulada y conservada en el historial.");
       void utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
@@ -589,6 +611,17 @@ export default function Home() {
     setResponsibleDraft(user?.name ?? "Usuario actual");
     setNoteDraft(row.state?.note ?? "");
     setShowHistory(false);
+  }
+
+  function openCorrectiveEditor(row: any) {
+    const fields = getImportedFields(row.workOrder.sourceData);
+    setEditingCorrective({
+      id: row.workOrder.id,
+      otNumber: row.workOrder.otNumber,
+      equipmentCode: row.equipment?.code ?? "",
+      reservation: fields.Reserva ?? "",
+      description: row.workOrder.description ?? fields["Descripción de operación"] ?? "",
+    });
   }
 
   async function handleFile(file: File) {
@@ -1128,14 +1161,6 @@ export default function Home() {
                   <span className="rounded-full border border-white/10 px-2 py-1 font-semibold text-slate-300">
                     {GUARD_LABEL[guard]}
                   </span>
-                  {selectedRelation && (
-                    <>
-                      <ArrowRight className="h-3.5 w-3.5" />
-                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 font-semibold text-emerald-300">
-                        Entrega a {selectedRelation}
-                      </span>
-                    </>
-                  )}
                 </div>
               </div>
             </section>
@@ -1529,6 +1554,7 @@ export default function Home() {
                           const fields = getImportedFields(
                             row.workOrder.sourceData
                           );
+                          const isCorrective = fields.Tipo === "Correctiva";
                           const requiresLogistics =
                             row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
                           const rowTone = row.execution?.status === "CERRADA_NOTIFICADA"
@@ -1620,6 +1646,26 @@ export default function Home() {
                                   >
                                     Revisar
                                   </button>
+                                )}
+                                {isFacilitator && isCorrective && (
+                                  <>
+                                    <button
+                                      onClick={() => openCorrectiveEditor(row)}
+                                      className="ml-2 rounded-lg border border-sky-300/20 px-2.5 py-1.5 text-[11px] font-semibold text-sky-200 transition hover:bg-sky-300/10"
+                                    >
+                                      Editar
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (window.confirm("¿Anular esta OT correctiva? Se conservará en el historial, pero dejará de aparecer en el panel activo."))
+                                          cancelCorrectiveOtMutation.mutate({ workOrderId: row.workOrder.id });
+                                      }}
+                                      disabled={cancelCorrectiveOtMutation.isPending}
+                                      className="ml-2 rounded-lg border border-rose-300/20 px-2.5 py-1.5 text-[11px] font-semibold text-rose-200 transition hover:bg-rose-300/10 disabled:opacity-40"
+                                    >
+                                      Anular
+                                    </button>
+                                  </>
                                 )}
                               </td>
                             </tr>

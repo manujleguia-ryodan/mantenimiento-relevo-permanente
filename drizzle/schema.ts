@@ -61,7 +61,11 @@ export const warehouses = mysqlTable("warehouses", {
 export const workOrders = mysqlTable("workOrders", {
   id: int("id").autoincrement().primaryKey(), weekId: int("weekId").notNull(),
   otNumber: varchar("otNumber", { length: 80 }).notNull(), equipmentId: int("equipmentId").notNull(),
-  description: text("description"), sourceData: text("sourceData"), createdAt: timestamp("createdAt").defaultNow().notNull(),
+  description: text("description"), sourceData: text("sourceData"),
+  isCancelled: boolean("isCancelled").default(false).notNull(),
+  cancelledAt: timestamp("cancelledAt"), cancelledById: int("cancelledById"),
+  cancellationReason: varchar("cancellationReason", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => ({
   periodOtUnique: uniqueIndex("workOrders_period_ot_unique").on(table.weekId, table.otNumber),
   weekIdx: index("workOrders_week_idx").on(table.weekId), equipmentIdx: index("workOrders_equipment_idx").on(table.equipmentId),

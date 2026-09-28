@@ -44,7 +44,7 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
     .from(workOrders).leftJoin(equipment, eq(workOrders.equipmentId, equipment.id))
     .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId), eq(otStates.guard, guard)))
     .leftJoin(otExecutions, and(eq(otExecutions.workOrderId, workOrders.id), eq(otExecutions.weekId, weekId), eq(otExecutions.guard, guard)))
-    .leftJoin(handovers, eq(otStates.inheritedFromHandoverId, handovers.id)).where(eq(workOrders.weekId, weekId));
+    .leftJoin(handovers, eq(otStates.inheritedFromHandoverId, handovers.id)).where(and(eq(workOrders.weekId, weekId), eq(workOrders.isCancelled, false)));
   const visibleRows = selectedIds.length ? rows.filter(row => selectedIds.includes(row.workOrder.equipmentId)) : [];
   const stateIds = visibleRows.map(row => row.state?.id).filter((id): id is number => Boolean(id));
   const pending = stateIds.length ? await db.select().from(otStatePendingWarehouses).where(inArray(otStatePendingWarehouses.otStateId, stateIds)) : [];

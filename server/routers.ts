@@ -113,6 +113,16 @@ export function insertId(result: unknown) {
   return id;
 }
 
+function correctiveSource(sourceData: string | null) {
+  if (!sourceData) return null;
+  try {
+    const parsed = JSON.parse(sourceData) as Record<string, unknown>;
+    return parsed.Tipo === "Correctiva" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function buildGuardAssignmentRows(
   weekId: number,
   guard: "A" | "B" | "C" | "D",
@@ -381,6 +391,37 @@ export const appRouter = router({
           });
         }
         return { success: true, workOrderId: insertId(inserted), equipmentId };
+      }),
+
+    updateCorrectiveOt: facilitatorProcedure
+      .input(z.object({
+        workOrderId: z.number().int().positive(),
+        otNumber: z.string().trim().min(1).max(80),
+        equipmentCode: z.string().trim().min(1).max(80),
+        reservation: z.string().trim().max(160).optional(),
+        description: z.string().trim().min(1).max(10000),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        const [current] = await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1);
+        if (!current || current.isCancelled || !correctiveSource(current.sourceData)) throw new TRPCError({ code: "NOT_FOUND", message: "Solo se pueden editar OT correctivas manuales activas." });
+        const [duplicate] = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.weekId, current.weekId), eq(workOrders.otNumber, input.otNumber))).limit(1);
+        if (duplicate && duplicate.id !== input.workOrderId) throw new TRPCError({ code: "CONFLICT", message: "Ya existe otra OT con ese número en esta semana." });
+        const code = input.equipmentCode.toUpperCase();
+        const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, code)).limit(1);
+        const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code }));
+        await db.update(workOrders).set({ otNumber: input.otNumber, equipmentId, description: input.description, sourceData: JSON.stringify({ Reserva: input.reservation ?? "", "Descripción de operación": input.description, Tipo: "Correctiva" }) }).where(eq(workOrders.id, input.workOrderId));
+        return { success: true };
+      }),
+
+    cancelCorrectiveOt: facilitatorProcedure
+      .input(z.object({ workOrderId: z.number().int().positive(), reason: z.string().trim().max(500).optional() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const [current] = await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1);
+        if (!current || current.isCancelled || !correctiveSource(current.sourceData)) throw new TRPCError({ code: "NOT_FOUND", message: "Solo se pueden anular OT correctivas manuales activas." });
+        await db.update(workOrders).set({ isCancelled: true, cancelledAt: new Date(), cancelledById: ctx.user.id, cancellationReason: input.reason || "Anulada por el Facilitador" }).where(eq(workOrders.id, input.workOrderId));
+        return { success: true };
       }),
 
     saveAssignments: facilitatorProcedure
