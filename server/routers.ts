@@ -74,8 +74,14 @@ const adminProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
-function insertId(result: unknown) {
-  return Number((result as { insertId?: number }).insertId ?? 0);
+export function insertId(result: unknown) {
+  const header = Array.isArray(result) ? result[0] : result;
+  const value = (header as { insertId?: number | string | bigint } | null | undefined)?.insertId;
+  const id = Number(value ?? 0);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error("La base de datos no devolvió un ID de inserción válido.");
+  }
+  return id;
 }
 
 // Roles funcionales aprobados: admin = Facilitador; user = Supervisor.

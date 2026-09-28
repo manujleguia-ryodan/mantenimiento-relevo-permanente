@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { mapExcelRows, rowsFromExcelMatrix } from "@shared/excelImport";
+import { insertId } from "./routers";
 
 describe("Excel import mapping", () => {
+  it("reads MySQL insert IDs from both direct and tuple results", () => {
+    expect(insertId({ insertId: 7 })).toBe(7);
+    expect(insertId([{ insertId: "8" }, []])).toBe(8);
+  });
+
   it("detects common Spanish headers and keeps original columns", () => {
     const result = mapExcelRows([
       {
