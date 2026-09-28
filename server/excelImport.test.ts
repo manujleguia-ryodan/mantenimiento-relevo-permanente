@@ -8,8 +8,8 @@ describe("Excel import mapping", () => {
     expect(insertId([{ insertId: "8" }, []])).toBe(8);
   });
 
-  it("assigns each imported equipment once to the active guard", () => {
-    expect(buildGuardAssignmentRows(1, "A", [3, 3, 7], 22)).toEqual([
+  it("assigns each imported equipment once and ignores invalid IDs", () => {
+    expect(buildGuardAssignmentRows(1, "A", [0, -1, 3, 3, 7], 22)).toEqual([
       { weekId: 1, guard: "A", equipmentId: 3, selectedById: 22 },
       { weekId: 1, guard: "A", equipmentId: 7, selectedById: 22 },
     ]);

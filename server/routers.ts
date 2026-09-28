@@ -90,7 +90,11 @@ export function buildGuardAssignmentRows(
   equipmentIds: number[],
   selectedById: number
 ) {
-  return Array.from(new Set(equipmentIds)).map(equipmentId => ({
+  const validEquipmentIds = equipmentIds.filter(
+    (equipmentId): equipmentId is number =>
+      Number.isSafeInteger(equipmentId) && equipmentId > 0
+  );
+  return Array.from(new Set(validEquipmentIds)).map(equipmentId => ({
     weekId,
     guard,
     equipmentId,

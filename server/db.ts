@@ -36,7 +36,9 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
   const [week] = await db.select().from(maintenanceWeeks).where(eq(maintenanceWeeks.id, weekId)).limit(1);
   if (!week) throw new Error("Semana no encontrada");
   const selected = await db.select().from(guardAssignments).where(and(eq(guardAssignments.weekId, weekId), eq(guardAssignments.guard, guard)));
-  const selectedIds = selected.map(item => item.equipmentId);
+  const selectedIds = selected
+    .map(item => item.equipmentId)
+    .filter((id): id is number => Number.isSafeInteger(id) && id > 0);
   const rows = await db.select({ workOrder: workOrders, equipment, state: otStates, inheritedFrom: handovers.fromGuard })
     .from(workOrders).leftJoin(equipment, eq(workOrders.equipmentId, equipment.id))
     .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId), eq(otStates.guard, guard)))

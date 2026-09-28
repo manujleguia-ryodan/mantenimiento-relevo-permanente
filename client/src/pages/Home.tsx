@@ -358,7 +358,11 @@ export default function Home() {
 
   useEffect(() => {
     if (dashboard.data) {
-      setSelectedEquipmentIds(dashboard.data.selectedEquipmentIds);
+      setSelectedEquipmentIds(
+        dashboard.data.selectedEquipmentIds.filter(
+          id => Number.isSafeInteger(id) && id > 0
+        )
+      );
       const relation = bootstrap.data?.relations?.find(
         item => item.fromGuard === guard
       );
@@ -515,9 +519,13 @@ export default function Home() {
   }
 
   function toggleEquipment(id: number) {
-    const next = selectedEquipmentIds.includes(id)
-      ? selectedEquipmentIds.filter(item => item !== id)
-      : [...selectedEquipmentIds, id];
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    const current = selectedEquipmentIds.filter(
+      item => Number.isSafeInteger(item) && item > 0
+    );
+    const next = current.includes(id)
+      ? current.filter(item => item !== id)
+      : [...current, id];
     setSelectedEquipmentIds(next);
     if (selectedWeekId)
       assignmentMutation.mutate({
