@@ -275,6 +275,7 @@ export default function Home() {
         ? "Visualizador"
         : "Supervisor";
   const [pin, setPin] = useState("");
+  const [selectedLoginUserId, setSelectedLoginUserId] = useState("admin");
   const [showLoginPin, setShowLoginPin] = useState(false);
   const [pinLoginError, setPinLoginError] = useState<string | null>(null);
   const [selectedWeekId, setSelectedWeekId] = useState<number | null>(null);
@@ -351,6 +352,7 @@ export default function Home() {
   const bootstrap = trpc.maintenance.bootstrap.useQuery(undefined, {
     enabled: isAuthenticated,
   });
+  const loginUsers = trpc.auth.accessUsers.useQuery();
   const utils = trpc.useUtils();
   const pinLoginMutation = trpc.auth.pinLogin.useMutation({
     onSuccess: async () => {
@@ -886,9 +888,21 @@ export default function Home() {
                 onSubmit={event => {
                   event.preventDefault();
                   setPinLoginError(null);
-                  pinLoginMutation.mutate({ pin });
+                  pinLoginMutation.mutate({ pin, selectedUserId: selectedLoginUserId });
                 }}
               >
+                <select
+                  aria-label="Seleccionar usuario"
+                  value={selectedLoginUserId}
+                  onChange={event => setSelectedLoginUserId(event.target.value)}
+                  className="h-12 w-full rounded-xl border border-white/10 bg-[#121a1c] px-4 text-sm text-white outline-none transition focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/20 sm:w-64"
+                >
+                  {(loginUsers.data ?? [{ id: "admin", label: "Administrador", role: "admin", guard: "A" }]).map(loginUser => (
+                    <option key={loginUser.id} value={loginUser.id}>
+                      {loginUser.label}{loginUser.role === "admin" ? " · Administrador" : ` · Guardia ${loginUser.guard === "A" ? "1" : loginUser.guard === "B" ? "2" : loginUser.guard === "C" ? "3" : "4"}`}
+                    </option>
+                  ))}
+                </select>
                 <div className="relative min-w-0 flex-1">
                   <input
                     aria-label="PIN o código de acceso"

@@ -152,8 +152,20 @@ export const appRouter = router({
       ({ ctx }) =>
         ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req), new Date(), getSharedAccessGuard(ctx.req), getSharedAccessName(ctx.req)) : null)
     ),
+    accessUsers: publicProcedure.query(async () => {
+      const db = await getDb();
+      const managedUsers = db
+        ? await db.select({ id: accessCodes.id, label: accessCodes.label, role: accessCodes.role, guard: accessCodes.guard })
+          .from(accessCodes)
+          .where(eq(accessCodes.active, true))
+        : [];
+      return [
+        { id: "admin", label: "Administrador", role: "admin" as const, guard: "A" as const },
+        ...managedUsers.map(user => ({ id: String(user.id), label: user.label, role: user.role, guard: user.guard })),
+      ];
+    }),
     pinLogin: publicProcedure
-      .input(z.object({ pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
+      .input(z.object({ pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128), selectedUserId: z.string().min(1).max(32).optional() }))
       .mutation(async ({ ctx, input }) => {
         const configuredPin = getConfiguredSharedPin();
         const signingSecret = process.env.JWT_SECRET;
@@ -173,12 +185,25 @@ export const appRouter = router({
               "Demasiados intentos. Espera 15 minutos antes de volver a probar.",
           });
         }
-        let accessRole: "admin" | "facilitator" | "supervisor" | null =
-          matchesSharedPin(input.pin, configuredPin) ? "admin" : null;
+        let accessRole: "admin" | "facilitator" | "supervisor" | null = null;
         let accessGuard: "A" | "B" | "C" | "D" = "A";
         let accessName = "Acceso compartido";
         const db = await getDb();
-        if (!accessRole && db) {
+        if (!input.selectedUserId || input.selectedUserId === "admin") {
+          if (matchesSharedPin(input.pin, configuredPin)) accessRole = "admin";
+        }
+        if (!accessRole && db && input.selectedUserId && input.selectedUserId !== "admin") {
+          const selectedId = Number(input.selectedUserId);
+          const [selected] = Number.isSafeInteger(selectedId)
+            ? await db.select().from(accessCodes).where(and(eq(accessCodes.id, selectedId), eq(accessCodes.active, true))).limit(1)
+            : [];
+          if (selected && matchesAccessCode(input.pin, selected.salt, selected.codeHash)) {
+            accessRole = selected.role;
+            accessGuard = selected.guard;
+            accessName = selected.label;
+            await db.update(accessCodes).set({ lastUsedAt: new Date() }).where(eq(accessCodes.id, selected.id));
+          }
+        } else if (!accessRole && db && !input.selectedUserId) {
           const codes = await db.select().from(accessCodes).where(eq(accessCodes.active, true));
           const matched = codes.find(code => matchesAccessCode(input.pin, code.salt, code.codeHash));
           if (matched) {
