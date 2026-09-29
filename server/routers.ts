@@ -500,6 +500,14 @@ export const appRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
+        const weekEquipment = await db.select({ id: equipment.id })
+          .from(equipment)
+          .innerJoin(workOrders, eq(workOrders.equipmentId, equipment.id))
+          .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.isCancelled, false)));
+        const allowedEquipmentIds = new Set(weekEquipment.map(item => item.id));
+        if (input.equipmentIds.some(equipmentId => !allowedEquipmentIds.has(equipmentId))) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Solo puedes asignar equipos de la semana seleccionada." });
+        }
         await db
           .delete(guardAssignments)
           .where(

@@ -36,6 +36,19 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
   const db = await requireDb();
   const [week] = await db.select().from(maintenanceWeeks).where(eq(maintenanceWeeks.id, weekId)).limit(1);
   if (!week) throw new Error("Semana no encontrada");
+  const weekWorkOrderEquipment = await db.select({ equipmentId: workOrders.equipmentId })
+    .from(workOrders)
+    .where(and(eq(workOrders.weekId, weekId), eq(workOrders.isCancelled, false)));
+  const weekAssignedEquipment = await db.select({ equipmentId: guardAssignments.equipmentId })
+    .from(guardAssignments)
+    .where(eq(guardAssignments.weekId, weekId));
+  const weekEquipmentIds = Array.from(new Set([
+    ...weekWorkOrderEquipment.map(item => item.equipmentId),
+    ...weekAssignedEquipment.map(item => item.equipmentId),
+  ])).filter((id): id is number => Number.isSafeInteger(id) && id > 0);
+  const weekEquipment = weekEquipmentIds.length
+    ? await db.select().from(equipment).where(inArray(equipment.id, weekEquipmentIds)).orderBy(equipment.code)
+    : [];
   const selected = await db.select().from(guardAssignments).where(and(eq(guardAssignments.weekId, weekId), eq(guardAssignments.guard, guard)));
   const selectedIds = selected
     .map(item => item.equipmentId)
@@ -70,7 +83,7 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
     requiresLogistics: hasReservation(row.workOrder.sourceData),
     pendingWarehouses: row.state?.id ? pendingByState.get(row.state.id) ?? [] : [],
   }));
-  return { week, guard, selectedEquipmentIds: selectedIds, rows: enrichedRows, selectedEquipment: (await getEquipment()).filter(item => selectedIds.includes(item.id)), allEquipment: await getEquipment(), warehouses: await getWarehouses() };
+  return { week, guard, selectedEquipmentIds: selectedIds, rows: enrichedRows, selectedEquipment: weekEquipment.filter(item => selectedIds.includes(item.id)), allEquipment: weekEquipment, warehouses: await getWarehouses() };
 }
 
 export async function getOtHistory(workOrderId: number) { const db = await requireDb(); return db.select().from(otHistory).where(eq(otHistory.workOrderId, workOrderId)).orderBy(desc(otHistory.createdAt)); }
