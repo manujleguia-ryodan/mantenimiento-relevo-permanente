@@ -25,6 +25,7 @@ import {
   getGuardRelations,
   getLatestHandover,
   getOtHistory,
+  searchHistoricalWorkOrders,
   getWarehouses,
   getWeeks,
   requireDb,
@@ -625,6 +626,9 @@ export const appRouter = router({
     history: sharedAccessProcedure
       .input(z.object({ workOrderId: z.number().int().positive() }))
       .query(({ input }) => getOtHistory(input.workOrderId)),
+    historicalByEquipment: sharedAccessProcedure
+      .input(z.object({ equipmentQuery: z.string().trim().min(1).max(80) }))
+      .query(({ input }) => searchHistoricalWorkOrders(input.equipmentQuery)),
 
     generateHandover: facilitatorProcedure
       .input(z.object({ weekId: z.number().int().positive(), fromGuard: guardSchema, toGuard: guardSchema }))

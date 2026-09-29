@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser, equipment, guardAssignments, guardRelations, handoverItems, handovers,
@@ -87,6 +87,25 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
 }
 
 export async function getOtHistory(workOrderId: number) { const db = await requireDb(); return db.select().from(otHistory).where(eq(otHistory.workOrderId, workOrderId)).orderBy(desc(otHistory.createdAt)); }
+export async function searchHistoricalWorkOrders(equipmentQuery: string) {
+  const db = await requireDb();
+  const query = equipmentQuery.trim();
+  if (!query) return [];
+  const rows = await db.select({ workOrder: workOrders, equipment, week: maintenanceWeeks })
+    .from(workOrders)
+    .innerJoin(equipment, eq(workOrders.equipmentId, equipment.id))
+    .innerJoin(maintenanceWeeks, eq(workOrders.weekId, maintenanceWeeks.id))
+    .where(and(eq(workOrders.isCancelled, false), like(equipment.code, `%${query}%`)))
+    .orderBy(desc(maintenanceWeeks.year), desc(maintenanceWeeks.weekNumber), desc(workOrders.createdAt));
+  const ids = rows.map(row => row.workOrder.id);
+  const states = ids.length ? await db.select().from(otStates).where(inArray(otStates.workOrderId, ids)) : [];
+  const latestState = new Map<number, (typeof states)[number]>();
+  for (const state of states) {
+    const current = latestState.get(state.workOrderId);
+    if (!current || new Date(state.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) latestState.set(state.workOrderId, state);
+  }
+  return rows.map(row => ({ ...row, state: latestState.get(row.workOrder.id) ?? null }));
+}
 export async function getLatestHandover(weekId: number, fromGuard: "A" | "B" | "C" | "D", toGuard: "A" | "B" | "C" | "D") {
   const db = await requireDb(); const [handover] = await db.select().from(handovers).where(and(eq(handovers.weekId, weekId), eq(handovers.fromGuard, fromGuard), eq(handovers.toGuard, toGuard))).orderBy(desc(handovers.createdAt)).limit(1);
   if (!handover) return null; const items = await db.select().from(handoverItems).where(eq(handoverItems.handoverId, handover.id)); return { handover, items };

@@ -5,7 +5,7 @@ import {
   normalizeExcelHeader,
   rowsFromExcelMatrix,
 } from "@shared/excelImport";
-import { hasReservation } from "@shared/maintenance";
+import { getReservationValue, hasReservation } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -285,6 +285,7 @@ export default function Home() {
   const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
+  const [historicalEquipmentSearch, setHistoricalEquipmentSearch] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -351,6 +352,10 @@ export default function Home() {
 
   const bootstrap = trpc.maintenance.bootstrap.useQuery(undefined, {
     enabled: isAuthenticated,
+  });
+  const historicalInput = useMemo(() => ({ equipmentQuery: historicalEquipmentSearch.trim() }), [historicalEquipmentSearch]);
+  const historicalQuery = trpc.maintenance.historicalByEquipment.useQuery(historicalInput, {
+    enabled: Boolean(isAuthenticated && activeSection === "historico" && historicalInput.equipmentQuery.length > 0),
   });
   const loginUsers = trpc.auth.accessUsers.useQuery();
   const utils = trpc.useUtils();
@@ -1081,6 +1086,7 @@ export default function Home() {
               { id: "panel", label: "Panel de control", icon: BarChart3 },
               { id: "equipos", label: "Equipos de mi guardia", icon: Truck },
               { id: "ot", label: "OT y recepción", icon: ClipboardCheck },
+              { id: "historico", label: "Histórico de OT", icon: History },
             ].filter(item => item.id !== "relevo" || isFacilitator).map(item => (
               <button
                 key={item.id}
@@ -1782,6 +1788,67 @@ export default function Home() {
                       Click en “Revisar” para registrar recepción e historial
                     </span>
                   </div>
+                </section>
+
+                <section id="historico" className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-300">
+                        <History className="h-3.5 w-3.5" /> Consulta histórica
+                      </div>
+                      <h2 className="mt-1 font-display text-2xl text-white">Histórico de OT por equipo</h2>
+                      <p className="mt-1 text-sm text-slate-500">Busca un equipo para consultar sus OT de todas las semanas registradas.</p>
+                    </div>
+                    <div className="relative w-full sm:w-80">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+                      <input
+                        value={historicalEquipmentSearch}
+                        onChange={event => setHistoricalEquipmentSearch(event.target.value)}
+                        placeholder="Ej. CA05, CR02..."
+                        className="h-11 w-full rounded-xl border border-violet-300/20 bg-white/[0.035] pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-300/50"
+                      />
+                    </div>
+                  </div>
+                  {!historicalInput.equipmentQuery ? (
+                    <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">Escribe un código de equipo para consultar su histórico.</div>
+                  ) : historicalQuery.isLoading ? (
+                    <div className="mt-5 rounded-xl border border-white/[0.06] p-8 text-center text-sm text-slate-500">Buscando OT…</div>
+                  ) : historicalQuery.data?.length ? (
+                    <div className="mt-5 overflow-x-auto rounded-xl border border-white/[0.06]">
+                      <table className="w-full min-w-[760px] text-left">
+                        <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-600">
+                          <tr>
+                            <th className="px-4 py-3 font-bold">Semana</th>
+                            <th className="px-4 py-3 font-bold">OT</th>
+                            <th className="px-4 py-3 font-bold">Equipo</th>
+                            <th className="px-4 py-3 font-bold">Reserva</th>
+                            <th className="px-4 py-3 font-bold">Descripción</th>
+                            <th className="px-4 py-3 font-bold">Recepción</th>
+                            <th className="px-4 py-3 font-bold">Actualizado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/[0.05]">
+                          {historicalQuery.data.map(row => {
+                            const fields = getImportedFields(row.workOrder.sourceData);
+                            const historicalStatus = (row.state?.status ?? "SIN_REVISAR") as Status;
+                            return (
+                              <tr key={row.workOrder.id} className="hover:bg-white/[0.025]">
+                                <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-violet-200">SEM {row.week.weekNumber} · {row.week.year}</td>
+                                <td className="whitespace-nowrap px-4 py-3 font-mono text-sm font-semibold text-white">{row.workOrder.otNumber}</td>
+                                <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-amber-200">{row.equipment.code}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">{getReservationValue(row.workOrder.sourceData) || "Sin reserva"}</td>
+                                <td className="max-w-[320px] px-4 py-3 text-xs text-slate-300" title={row.workOrder.description ?? fields["Descripción de operación"] ?? ""}>{row.workOrder.description ?? fields["Descripción de operación"] ?? "—"}</td>
+                                <td className="whitespace-nowrap px-4 py-3">{row.state ? <StatusPill status={historicalStatus} /> : <span className="text-xs text-slate-600">Sin revisar</span>}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{formatDate(row.state?.updatedAt)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No se encontraron OT para ese equipo.</div>
+                  )}
                 </section>
 
                 {false && isFacilitator && <section
