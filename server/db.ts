@@ -46,11 +46,26 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
     .leftJoin(otExecutions, and(eq(otExecutions.workOrderId, workOrders.id), eq(otExecutions.weekId, weekId), eq(otExecutions.guard, guard)))
     .leftJoin(handovers, eq(otStates.inheritedFromHandoverId, handovers.id)).where(and(eq(workOrders.weekId, weekId), eq(workOrders.isCancelled, false)));
   const visibleRows = selectedIds.length ? rows.filter(row => selectedIds.includes(row.workOrder.equipmentId)) : [];
-  const stateIds = visibleRows.map(row => row.state?.id).filter((id): id is number => Boolean(id));
+  const visibleWorkOrderIds = visibleRows.map(row => row.workOrder.id);
+  const allStates = visibleWorkOrderIds.length
+    ? await db.select().from(otStates).where(and(eq(otStates.weekId, weekId), inArray(otStates.workOrderId, visibleWorkOrderIds)))
+    : [];
+  const latestStateByWorkOrder = new Map<number, (typeof allStates)[number]>();
+  for (const candidate of allStates) {
+    const current = latestStateByWorkOrder.get(candidate.workOrderId);
+    if (!current || new Date(candidate.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) {
+      latestStateByWorkOrder.set(candidate.workOrderId, candidate);
+    }
+  }
+  const sharedStateRows = visibleRows.map(row => ({
+    ...row,
+    state: latestStateByWorkOrder.get(row.workOrder.id) ?? null,
+  }));
+  const stateIds = sharedStateRows.map(row => row.state?.id).filter((id): id is number => Boolean(id));
   const pending = stateIds.length ? await db.select().from(otStatePendingWarehouses).where(inArray(otStatePendingWarehouses.otStateId, stateIds)) : [];
   const pendingByState = new Map<number, typeof pending>();
   for (const item of pending) { const list = pendingByState.get(item.otStateId) ?? []; list.push(item); pendingByState.set(item.otStateId, list); }
-  const enrichedRows = visibleRows.map(row => ({
+  const enrichedRows = sharedStateRows.map(row => ({
     ...row,
     requiresLogistics: hasReservation(row.workOrder.sourceData),
     pendingWarehouses: row.state?.id ? pendingByState.get(row.state.id) ?? [] : [],

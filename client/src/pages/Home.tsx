@@ -1564,6 +1564,9 @@ export default function Home() {
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
                             Equipo
                           </th>
+                          <th className="whitespace-nowrap px-3 py-3 font-bold">
+                            Acción
+                          </th>
                           {excelColumns.map(column => (
                             <th
                               key={column}
@@ -1627,6 +1630,16 @@ export default function Home() {
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-sm text-amber-200/85">
                                 {row.equipment?.code ?? "—"}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2.5">
+                                {isFacilitator && requiresLogistics && (
+                                  <button
+                                    onClick={() => openEdit(row)}
+                                    className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 shadow-sm transition hover:bg-amber-300/20 hover:text-amber-100"
+                                  >
+                                    Revisar
+                                  </button>
+                                )}
                               </td>
                               {excelColumns.map(column => {
                                 const value = formatImportedCell(
@@ -1698,14 +1711,6 @@ export default function Home() {
                                     {row.execution?.status === "CERRADA_NOTIFICADA"
                                       ? "Reabrir OT"
                                       : "Cerrar y notificar"}
-                                  </button>
-                                )}
-                                {isFacilitator && requiresLogistics && (
-                                  <button
-                                    onClick={() => openEdit(row)}
-                                    className="rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 opacity-70 transition hover:border-amber-300/30 hover:text-amber-200 group-hover:opacity-100"
-                                  >
-                                    Revisar
                                   </button>
                                 )}
                                 {isFacilitator && isCorrective && (
