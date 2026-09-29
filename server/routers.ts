@@ -571,10 +571,10 @@ export const appRouter = router({
         await db.transaction(async tx => {
           if (existing) {
             stateId = existing.id;
-            await tx.update(otStates).set({ status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, note: input.note?.trim() || null, updatedById: ctx.user.id, updatedAt: new Date() }).where(eq(otStates.id, existing.id));
+            await tx.update(otStates).set({ status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: ctx.user.role, note: input.note?.trim() || null, updatedById: ctx.user.id, updatedAt: new Date() }).where(eq(otStates.id, existing.id));
             await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, existing.id));
           } else {
-            const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, note: input.note?.trim() || null, updatedById: ctx.user.id });
+            const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: ctx.user.role, note: input.note?.trim() || null, updatedById: ctx.user.id });
             stateId = insertId(inserted);
           }
           if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
@@ -601,6 +601,16 @@ export const appRouter = router({
           .limit(1);
         if (!workOrder || workOrder.weekId !== input.weekId)
           throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
+        if (ctx.user.role === "supervisor" && input.closed) {
+          const [review] = await db.select({ status: otStates.status, reviewedByRole: otStates.reviewedByRole })
+            .from(otStates)
+            .where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard)))
+            .orderBy(desc(otStates.updatedAt))
+            .limit(1);
+          if (!review || review.status === "SIN_REVISAR" || (review.reviewedByRole !== "facilitator" && review.reviewedByRole !== "admin")) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El Facilitador debe revisar esta OT antes de que el Supervisor pueda cerrarla." });
+          }
+        }
         const status = input.closed ? "CERRADA_NOTIFICADA" : "ABIERTA";
         const values = {
           status,

@@ -94,7 +94,7 @@ export const otStates = mysqlTable("otStates", {
   guard: mysqlEnum("guard", ["A", "B", "C", "D"]).notNull(),
   status: mysqlEnum("status", ["SIN_REVISAR", "RECIBIDA", "PARCIAL", "FALTA_RECIBIR"]).default("SIN_REVISAR").notNull(),
   pendingWarehouse1: boolean("pendingWarehouse1").default(false).notNull(), pendingWarehouse2: boolean("pendingWarehouse2").default(false).notNull(),
-  inheritedFromHandoverId: int("inheritedFromHandoverId"), responsibleName: varchar("responsibleName", { length: 160 }),
+  inheritedFromHandoverId: int("inheritedFromHandoverId"), responsibleName: varchar("responsibleName", { length: 160 }), reviewedByRole: varchar("reviewedByRole", { length: 32 }),
   note: text("note"), updatedById: int("updatedById"), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => ({
   stateUnique: uniqueIndex("otStates_unique").on(table.workOrderId, table.weekId, table.guard),

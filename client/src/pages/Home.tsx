@@ -62,7 +62,7 @@ function parseCorrectiveLines(value: string) {
     const otToken = tokens.find(token => /^(?:OT)?[67]\d{5,}$/i.test(token.value));
     const reservationToken = tokens.find(token => /^(?:R)?[34]\d{5,}$/i.test(token.value));
     const equipmentToken = tokens.find(token =>
-      /^[A-Z]{1,6}\d{1,4}$/i.test(token.value) && !/^(?:OT|R|CR)\d+$/i.test(token.value)
+      /^[A-Z]{1,6}\d{1,4}$/i.test(token.value) && !/^(?:OT|R)\d+$/i.test(token.value)
     );
     if (!otToken || !equipmentToken) {
       invalid.push(rawLine);

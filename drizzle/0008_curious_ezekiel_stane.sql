@@ -1,0 +1,1 @@
+ALTER TABLE `otStates` ADD `reviewedByRole` varchar(32);
