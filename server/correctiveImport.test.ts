@@ -50,4 +50,36 @@ describe("Corrective OT parser", () => {
     expect(result.rows.map(row => row.equipmentCode)).toEqual([...currentCrEquipmentCodes]);
     expect(result.rows.every(row => row.description.startsWith("CR "))).toBe(true);
   });
+
+  it("acepta equipos compuestos y conserva OT sin equipo separado como SIN_EQUIPO", () => {
+    const result = parseCorrectiveLines(
+      [
+        "OT 6833381 CR_T_CAMBIO DE ELECTROVALVULA SECADOR R 3426196",
+        "OT 6653921 R 3176138 CO_CILINDRO DE VOLTEO RH_TR02",
+        "OT 6831958 R 3424542 CR CAMBIO DE CLIP DE TUBERIA DE DIRECCION",
+      ].join("\n")
+    );
+
+    expect(result.invalid).toEqual([]);
+    expect(result.rows).toMatchObject([
+      {
+        otNumber: "6833381",
+        reservation: "3426196",
+        equipmentCode: "SIN_EQUIPO",
+        description: "CR_T_CAMBIO DE ELECTROVALVULA SECADOR",
+      },
+      {
+        otNumber: "6653921",
+        reservation: "3176138",
+        equipmentCode: "RH_TR02",
+        description: "CO_CILINDRO DE VOLTEO",
+      },
+      {
+        otNumber: "6831958",
+        reservation: "3424542",
+        equipmentCode: "SIN_EQUIPO",
+        description: "CR CAMBIO DE CLIP DE TUBERIA DE DIRECCION",
+      },
+    ]);
+  });
 });

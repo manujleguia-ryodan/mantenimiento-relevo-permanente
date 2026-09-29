@@ -21,16 +21,17 @@ export function parseCorrectiveLines(value: string) {
     const reservationToken = tokens.find(token => /^(?:R)?[34]\d{5,}$/i.test(token.value));
     const equipmentToken = tokens.find(
       token =>
-        /^[A-Z]{1,6}\d{1,4}$/i.test(token.value) &&
+        /^[A-Z]{1,8}(?:_[A-Z]{1,8})?\d{1,4}$/i.test(token.value) &&
         !/^(?:OT|R)\d+$/i.test(token.value)
     );
 
-    if (!otToken || !equipmentToken) {
+    if (!otToken) {
       invalid.push(rawLine);
       continue;
     }
 
-    const excluded = new Set([otToken.index, equipmentToken.index]);
+    const excluded = new Set([otToken.index]);
+    if (equipmentToken) excluded.add(equipmentToken.index);
     if (reservationToken) excluded.add(reservationToken.index);
     const description = tokens
       .filter(token => !excluded.has(token.index) && !/^(?:OT|R)$/i.test(token.value))
@@ -46,7 +47,7 @@ export function parseCorrectiveLines(value: string) {
     rows.push({
       otNumber: otToken.value.replace(/^OT/i, ""),
       reservation: reservationToken?.value.replace(/^R/i, "") ?? "",
-      equipmentCode: equipmentToken.value.toUpperCase(),
+      equipmentCode: equipmentToken?.value.toUpperCase() ?? "SIN_EQUIPO",
       description,
     });
   }
