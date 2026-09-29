@@ -547,6 +547,11 @@ export default function Home() {
           .slice(0, preferred.length - selected.length)
       );
     }
+    const hasDescriptionColumn = selected.some(key => {
+      const normalized = normalizeExcelHeader(key);
+      return normalized === "descripcion" || normalized.includes("descripciondeoperacion") || normalized.includes("descripcionoperacion");
+    });
+    if (!hasDescriptionColumn) selected.push("Descripción de operación");
     return selected;
   }, [rows]);
   const importPreviewColumns = importPreview
@@ -1642,8 +1647,10 @@ export default function Home() {
                                 )}
                               </td>
                               {excelColumns.map(column => {
+                                const normalizedColumn = normalizeExcelHeader(column);
+                                const isDescriptionColumn = normalizedColumn === "descripcion" || normalizedColumn.includes("descripciondeoperacion") || normalizedColumn.includes("descripcionoperacion");
                                 const value = formatImportedCell(
-                                  fields[column]
+                                  fields[column] || (isDescriptionColumn ? row.workOrder.description ?? "" : undefined)
                                 );
                                 return (
                                   <td
