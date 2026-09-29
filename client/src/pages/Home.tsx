@@ -71,7 +71,7 @@ function parseCorrectiveLines(value: string) {
     const excluded = new Set([otToken.index, equipmentToken.index]);
     if (reservationToken) excluded.add(reservationToken.index);
     const description = tokens
-      .filter(token => !excluded.has(token.index) && !/^(?:OT|R|CR)$/i.test(token.value))
+      .filter(token => !excluded.has(token.index) && !/^(?:OT|R)$/i.test(token.value))
       .map(token => token.value)
       .join(" ")
       .trim();
