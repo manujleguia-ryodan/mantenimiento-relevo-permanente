@@ -1660,16 +1660,22 @@ export default function Home() {
                               </td>
                               {excelColumns.map(column => {
                                 const normalizedColumn = normalizeExcelHeader(column);
+                                const isReservationColumn = normalizedColumn.includes("reserva");
                                 const isDescriptionColumn = normalizedColumn === "descripcion" || normalizedColumn.includes("descripciondeoperacion") || normalizedColumn.includes("descripcionoperacion");
                                 const value = formatImportedCell(
-                                  fields[column] || (isDescriptionColumn ? row.workOrder.description ?? "" : undefined)
+                                  fields[column] ||
+                                    (isReservationColumn
+                                      ? getReservationValue(row.workOrder.sourceData)
+                                      : isDescriptionColumn
+                                        ? row.workOrder.description ?? ""
+                                        : undefined)
                                 );
                                 return (
                                   <td
                                     key={column}
-                                    className="max-w-[190px] px-3 py-2.5 text-xs text-slate-400"
+                                    className={`${isDescriptionColumn ? "min-w-[320px] max-w-[420px] whitespace-normal" : "max-w-[190px]"} px-3 py-2.5 text-xs text-slate-400`}
                                   >
-                                    <div className="truncate" title={value}>
+                                    <div className={isDescriptionColumn ? "whitespace-normal break-words leading-relaxed" : "truncate"} title={value}>
                                       {value}
                                     </div>
                                   </td>
