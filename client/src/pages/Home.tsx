@@ -358,25 +358,27 @@ export default function Home() {
     onError: error => toast.error(error.message),
   });
   const createCorrectiveOtMutation = trpc.maintenance.createCorrectiveOt.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("OT correctiva creada y visible en el panel.");
       setShowCorrectiveOt(false);
+      setOtTypeFilter("CORRECTIVAS");
       setCorrectiveOtNumber("");
       setCorrectiveEquipment("");
       setCorrectiveReservation("");
       setCorrectiveDescription("");
-      void utils.maintenance.dashboard.invalidate();
+      await utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
   });
   const createCorrectiveOtsMutation = trpc.maintenance.createCorrectiveOts.useMutation({
-    onSuccess: result => {
+    onSuccess: async result => {
       toast.success(`${result.created} OT correctivas creadas${result.duplicates ? ` · ${result.duplicates} repetidas omitidas` : ""}.`);
       setShowCorrectiveOt(false);
       setBulkCorrectiveMode(false);
+      setOtTypeFilter("CORRECTIVAS");
       setBulkCorrectiveText("");
       setBulkCorrectivePreview({ rows: [], invalid: [] });
-      void utils.maintenance.dashboard.invalidate();
+      await utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
   });
