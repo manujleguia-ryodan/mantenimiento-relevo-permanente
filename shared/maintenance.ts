@@ -30,6 +30,16 @@ export function hasReservation(sourceData?: string | null) {
   return Boolean(getReservationValue(sourceData));
 }
 
+export function isCorrectiveWorkOrder(sourceData?: string | null) {
+  if (!sourceData) return false;
+  try {
+    const parsed = JSON.parse(sourceData) as Record<string, unknown>;
+    return String(parsed.Tipo ?? "").trim().toLowerCase() === "correctiva";
+  } catch {
+    return false;
+  }
+}
+
 export function canReviewReception(status?: ReceptionStatus | null) {
   return !status || status === "SIN_REVISAR";
 }

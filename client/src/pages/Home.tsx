@@ -6,7 +6,7 @@ import {
   rowsFromExcelMatrix,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { canReviewReception, getReservationValue, hasReservation } from "@shared/maintenance";
+import { canReviewReception, getReservationValue, hasReservation, isCorrectiveWorkOrder } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -245,6 +245,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "TODOS">("TODOS");
   const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
+  const [otTypeFilter, setOtTypeFilter] = useState<"PROGRAMADAS" | "CORRECTIVAS" | "TODAS">("PROGRAMADAS");
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
   const [historicalEquipmentSearch, setHistoricalEquipmentSearch] = useState("");
@@ -597,9 +598,24 @@ export default function Home() {
         executionFilter === "TODAS" ||
         (executionFilter === "CERRADAS" && row.execution?.status === "CERRADA_NOTIFICADA") ||
         (executionFilter === "PENDIENTES" && row.execution?.status !== "CERRADA_NOTIFICADA");
-      return matchesSearch && matchesStatus && matchesWarehouse && matchesExecution;
+      const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
+      const matchesOtType =
+        otTypeFilter === "TODAS" ||
+        (otTypeFilter === "CORRECTIVAS" && isCorrective) ||
+        (otTypeFilter === "PROGRAMADAS" && !isCorrective);
+      return matchesSearch && matchesStatus && matchesWarehouse && matchesExecution && matchesOtType;
     });
-  }, [rows, search, statusFilter, warehouseFilter, executionFilter]);
+  }, [rows, search, statusFilter, warehouseFilter, executionFilter, otTypeFilter]);
+
+  const otTypeCounts = useMemo(() => rows.reduce(
+    (counts, row) => {
+      const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
+      if (isCorrective) counts.correctivas += 1;
+      else counts.programadas += 1;
+      return counts;
+    },
+    { programadas: 0, correctivas: 0 }
+  ), [rows]);
 
   const kpis = useMemo(() => {
     const logisticsRows = rows.filter(
@@ -1477,13 +1493,31 @@ export default function Home() {
                         operativo
                       </div>
                       <h2 className="mt-1 font-display text-2xl text-white">
-                        OT de la guardia {GUARD_LABEL[guard]}
+                        {otTypeFilter === "CORRECTIVAS" ? "OT correctivas" : otTypeFilter === "PROGRAMADAS" ? "OT programadas" : "Todas las OT"} · Guardia {GUARD_LABEL[guard]}
                       </h2>
                       <p className="mt-1 text-xs text-slate-500">
-                        OT, equipo, reserva y descripción de operación.
+                        Consulta cada tipo de OT por separado, con su equipo, reserva y descripción de operación.
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="flex rounded-xl border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Tipo de OT">
+                        {([
+                          ["PROGRAMADAS", "Programadas", otTypeCounts.programadas],
+                          ["CORRECTIVAS", "Correctivas", otTypeCounts.correctivas],
+                          ["TODAS", "Todas", otTypeCounts.programadas + otTypeCounts.correctivas],
+                        ] as const).map(([value, label, count]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="tab"
+                            aria-selected={otTypeFilter === value}
+                            onClick={() => setOtTypeFilter(value)}
+                            className={`rounded-lg px-3 py-2 text-[11px] font-bold transition ${otTypeFilter === value ? "bg-amber-300 text-[#0a0f10]" : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}
+                          >
+                            {label} <span className="ml-1 opacity-70">{count}</span>
+                          </button>
+                        ))}
+                      </div>
                       <div className="relative">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
                         <input

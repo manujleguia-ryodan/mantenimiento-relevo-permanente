@@ -5,6 +5,7 @@ import {
   getPendingWarehouseLabel,
   getReservationValue,
   hasReservation,
+  isCorrectiveWorkOrder,
   validateReceptionInput,
 } from "@shared/maintenance";
 
@@ -54,5 +55,11 @@ describe("maintenance business rules", () => {
     expect(canReviewReception("RECIBIDA")).toBe(false);
     expect(canReviewReception("PARCIAL")).toBe(false);
     expect(canReviewReception("FALTA_RECIBIR")).toBe(false);
+  });
+
+  it("separates corrective work orders from scheduled work orders", () => {
+    expect(isCorrectiveWorkOrder('{"Tipo":"Correctiva"}')).toBe(true);
+    expect(isCorrectiveWorkOrder('{"Tipo":"Programada"}')).toBe(false);
+    expect(isCorrectiveWorkOrder(null)).toBe(false);
   });
 });
