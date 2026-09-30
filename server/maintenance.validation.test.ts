@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateReceptionPercent,
+  canReviewReception,
   getPendingWarehouseLabel,
   getReservationValue,
   hasReservation,
@@ -45,5 +46,13 @@ describe("maintenance business rules", () => {
     expect(hasReservation('{"RESERVA":""}')).toBe(false);
     expect(hasReservation('{"RESERVA":"0"}')).toBe(false);
     expect(hasReservation(null)).toBe(false);
+  });
+
+  it("allows only the first reception review", () => {
+    expect(canReviewReception()).toBe(true);
+    expect(canReviewReception("SIN_REVISAR")).toBe(true);
+    expect(canReviewReception("RECIBIDA")).toBe(false);
+    expect(canReviewReception("PARCIAL")).toBe(false);
+    expect(canReviewReception("FALTA_RECIBIR")).toBe(false);
   });
 });

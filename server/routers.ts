@@ -35,6 +35,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import {
+  canReviewReception,
   hasReservation,
   validateReceptionInput,
 } from "@shared/maintenance";
@@ -564,21 +565,21 @@ export const appRouter = router({
           : [];
         if (selectedWarehouses.length !== warehouseCodes.length)
           throw new TRPCError({ code: "BAD_REQUEST", message: "Uno o más almacenes no están en el catálogo activo." });
-        const [existing] = await db.select().from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard))).limit(1);
+        const [existing] = await db.select().from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId))).limit(1);
+        if (existing && !canReviewReception(existing.status)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Esta OT ya fue recibida/revisada y no se puede revisar nuevamente.",
+          });
+        }
         const responsibleName = input.responsibleName?.trim() || ctx.user.name || ctx.user.email || "Usuario actual";
         const newPendingWarehouse = warehouseCodes.join(", ") || null;
         let stateId: number;
         await db.transaction(async tx => {
-          if (existing) {
-            stateId = existing.id;
-            await tx.update(otStates).set({ status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: ctx.user.role, note: input.note?.trim() || null, updatedById: ctx.user.id, updatedAt: new Date() }).where(eq(otStates.id, existing.id));
-            await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, existing.id));
-          } else {
-            const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: ctx.user.role, note: input.note?.trim() || null, updatedById: ctx.user.id });
-            stateId = insertId(inserted);
-          }
+          const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: ctx.user.role, note: input.note?.trim() || null, updatedById: ctx.user.id });
+          stateId = insertId(inserted);
           if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
-          await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: existing?.status || null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user.id, actorName: ctx.user.name || ctx.user.email || "Usuario actual" });
+          await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user.id, actorName: ctx.user.name || ctx.user.email || "Usuario actual" });
         });
         return { success: true, stateId: stateId! };
       }),

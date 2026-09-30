@@ -30,6 +30,10 @@ export function hasReservation(sourceData?: string | null) {
   return Boolean(getReservationValue(sourceData));
 }
 
+export function canReviewReception(status?: ReceptionStatus | null) {
+  return !status || status === "SIN_REVISAR";
+}
+
 export function getPendingWarehouseLabel(codes: string[] | boolean | null | undefined, legacySecond?: boolean) {
   if (typeof codes === "boolean") {
     if (codes && legacySecond) return "AMBOS";

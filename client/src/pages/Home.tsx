@@ -6,7 +6,7 @@ import {
   rowsFromExcelMatrix,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { getReservationValue, hasReservation } from "@shared/maintenance";
+import { canReviewReception, getReservationValue, hasReservation } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -1570,9 +1570,6 @@ export default function Home() {
                             Recepción
                           </th>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
-                            Pendiente
-                          </th>
-                          <th className="whitespace-nowrap px-4 py-3 font-bold">
                             Responsable / cierre
                           </th>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
@@ -1585,15 +1582,6 @@ export default function Home() {
                         {filteredRows.map(row => {
                           const state = (row.state?.status ??
                             "SIN_REVISAR") as Status;
-                          const pending =
-                            row.state?.pendingWarehouse1 &&
-                            row.state?.pendingWarehouse2
-                              ? "Ambos"
-                              : row.state?.pendingWarehouse1
-                                ? "Almacén 1"
-                                : row.state?.pendingWarehouse2
-                                  ? "Almacén 2"
-                                  : "—";
                           const fields = getImportedFields(
                             row.workOrder.sourceData
                           );
@@ -1620,12 +1608,18 @@ export default function Home() {
                               </td>
                               <td className="whitespace-nowrap px-3 py-2.5">
                                 {isFacilitator && requiresLogistics && (
-                                  <button
-                                    onClick={() => openEdit(row)}
-                                    className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 shadow-sm transition hover:bg-amber-300/20 hover:text-amber-100"
-                                  >
-                                    Revisar
-                                  </button>
+                                  !canReviewReception(row.state?.status as Status | undefined) ? (
+                                    <span className="inline-flex items-center rounded-xl border border-emerald-300/20 bg-emerald-300/[0.08] px-3.5 py-2 text-xs font-bold text-emerald-200">
+                                      Revisada
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() => openEdit(row)}
+                                      className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 shadow-sm transition hover:bg-amber-300/20 hover:text-amber-100"
+                                    >
+                                      Revisar
+                                    </button>
+                                  )
                                 )}
                               </td>
                               {excelColumns.map(column => {
@@ -1652,16 +1646,6 @@ export default function Home() {
                                   <span className="text-xs text-slate-500">
                                     Sin reserva
                                   </span>
-                                )}
-                              </td>
-                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-400">
-                                {requiresLogistics ? (
-                                  <>
-                                    {pending}
-                                    {row.inheritedFrom && <div className="mt-1 text-[10px] text-amber-300">Pendiente heredado de Guardia {GUARD_LABEL[row.inheritedFrom as Guard]}</div>}
-                                  </>
-                                ) : (
-                                  "OT sin reserva (No requiere repuestos)"
                                 )}
                               </td>
                               <td className="min-w-[190px] px-4 py-2.5 text-xs text-slate-400">
@@ -2129,6 +2113,47 @@ export default function Home() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {editingCorrective && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-2xl border border-sky-300/20 bg-[#11191a] shadow-2xl">
+            <div className="flex items-start justify-between border-b border-white/[0.07] p-5">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-sky-300">OT correctiva manual</div>
+                <h2 className="mt-1 font-display text-2xl text-white">Editar OT</h2>
+                <p className="mt-1 text-sm text-slate-500">Actualiza los datos operativos de la OT.</p>
+              </div>
+              <button onClick={() => setEditingCorrective(null)} className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white" aria-label="Cerrar edición">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form className="grid gap-4 p-5" onSubmit={event => {
+              event.preventDefault();
+              const { id, ...draft } = editingCorrective;
+              updateCorrectiveOtMutation.mutate({ workOrderId: id, ...draft });
+            }}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs text-slate-400">OT
+                  <input required value={editingCorrective.otNumber} onChange={event => setEditingCorrective(current => current ? { ...current, otNumber: event.target.value } : current)} className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" />
+                </label>
+                <label className="text-xs text-slate-400">Equipo
+                  <input required value={editingCorrective.equipmentCode} onChange={event => setEditingCorrective(current => current ? { ...current, equipmentCode: event.target.value } : current)} className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" />
+                </label>
+              </div>
+              <label className="text-xs text-slate-400">Reserva <span className="text-slate-600">(opcional)</span>
+                <input value={editingCorrective.reservation} onChange={event => setEditingCorrective(current => current ? { ...current, reservation: event.target.value } : current)} className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" />
+              </label>
+              <label className="text-xs text-slate-400">Descripción de operación
+                <textarea required rows={4} value={editingCorrective.description} onChange={event => setEditingCorrective(current => current ? { ...current, description: event.target.value } : current)} className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.035] p-3 text-sm text-white outline-none focus:border-sky-300/40" />
+              </label>
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setEditingCorrective(null)} className="rounded-xl px-4 py-2.5 text-sm text-slate-400 hover:bg-white/5">Cancelar</button>
+                <button type="submit" disabled={updateCorrectiveOtMutation.isPending} className="rounded-xl bg-sky-300 px-4 py-2.5 text-sm font-bold text-[#071014] disabled:opacity-50">{updateCorrectiveOtMutation.isPending ? "Guardando…" : "Guardar cambios"}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
