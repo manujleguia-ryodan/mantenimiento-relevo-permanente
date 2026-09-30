@@ -1028,14 +1028,14 @@ export default function Home() {
       </header>
       <div className="mx-auto flex max-w-[1560px]">
         <aside
-          className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/[0.07] bg-[#0d1415] px-4 py-5 transition-all lg:sticky lg:top-0 lg:block lg:h-screen lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[78px]" : "lg:w-[270px]"} ${mobileMenuOpen ? "translate-x-0 w-[270px]" : "-translate-x-full w-[270px]"}`}
+          className={`fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/[0.07] bg-[#0d1415] px-4 py-5 transition-all lg:sticky lg:top-0 lg:block lg:h-screen lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[78px] lg:px-2" : "lg:w-[270px] lg:px-4"} ${mobileMenuOpen ? "translate-x-0 w-[270px]" : "-translate-x-full w-[270px]"}`}
         >
-          <div className="flex items-center justify-between px-2">
+          <div className={`relative flex items-center px-2 ${sidebarCollapsed ? "lg:justify-center" : "lg:justify-between"}`}>
             <div className="flex items-center gap-3">
               <div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-300 text-[#0a0f10]">
                 <HardHat className="h-5 w-5" />
               </div>
-              <div>
+              <div className={sidebarCollapsed ? "lg:hidden" : ""}>
                 <div className="font-display text-lg leading-none text-white">
                   MANTENIMIENTO
                 </div>
@@ -1051,7 +1051,7 @@ export default function Home() {
               <PanelLeftClose className="h-4 w-4" />
             </button>
             <button
-              className="hidden rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white lg:block"
+              className="hidden rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white lg:absolute lg:right-0 lg:block"
               onClick={() => setSidebarCollapsed(current => !current)}
               aria-label={sidebarCollapsed ? "Mostrar panel lateral" : "Ocultar panel lateral"}
               title={sidebarCollapsed ? "Mostrar panel lateral" : "Ocultar panel lateral"}
@@ -1059,7 +1059,7 @@ export default function Home() {
               <PanelLeftClose className={`h-4 w-4 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`} />
             </button>
           </div>
-          <div className="mt-10 px-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
+          <div className={`mt-10 px-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
             Operación
           </div>
           <nav className="mt-3 space-y-1">
@@ -1072,42 +1072,42 @@ export default function Home() {
               <button
                 key={item.id}
                 onClick={() => scrollTo(item.id)}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${activeSection === item.id ? "bg-amber-300/10 font-semibold text-amber-200" : "text-slate-400 hover:bg-white/[0.04] hover:text-white"}`}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""} ${activeSection === item.id ? "bg-amber-300/10 font-semibold text-amber-200" : "text-slate-400 hover:bg-white/[0.04] hover:text-white"}`}
               >
                 <item.icon className="h-4 w-4" />
-                {item.label}
+                <span className={sidebarCollapsed ? "lg:hidden" : ""}>{item.label}</span>
               </button>
             ))}
           </nav>
-          <div className="mt-9 px-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
+          <div className={`mt-9 px-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
             Administración
           </div>
           <nav className="mt-3 space-y-1">
             {isFacilitator && (
               <button
                 onClick={() => setShowImport(true)}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white"
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
               >
                 <Import className="h-4 w-4" />
-                Importar Excel semanal
+                <span className={sidebarCollapsed ? "lg:hidden" : ""}>Importar Excel semanal</span>
               </button>
             )}
             {isAdmin && (
               <button
                 onClick={() => setShowAccessManagement(true)}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white"
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
               >
                 <ShieldCheck className="h-4 w-4" />
-                Gestionar accesos
+                <span className={sidebarCollapsed ? "lg:hidden" : ""}>Gestionar accesos</span>
               </button>
             )}
           </nav>
-          <div className="absolute bottom-5 left-4 right-4 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3">
-            <div className="flex items-center gap-3">
+          <div className={`absolute bottom-5 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 ${sidebarCollapsed ? "left-2 right-2 lg:p-2" : "left-4 right-4"}`}>
+            <div className={`flex items-center gap-3 ${sidebarCollapsed ? "lg:justify-center" : ""}`}>
               <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-700 text-sm font-bold text-white">
                 {(user?.name ?? "U").slice(0, 1).toUpperCase()}
               </div>
-              <div className="min-w-0 flex-1">
+              <div className={`min-w-0 flex-1 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
                 <div className="truncate text-sm font-semibold text-white">
                   {user?.name ?? "Usuario"}
                 </div>
@@ -1116,8 +1116,8 @@ export default function Home() {
                 </div>
               </div>
               <button
+                className={sidebarCollapsed ? "lg:hidden" : "rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white"}
                 onClick={() => logout()}
-                className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white"
               >
                 <LogOut className="h-4 w-4" />
               </button>
