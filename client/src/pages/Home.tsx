@@ -249,6 +249,7 @@ export default function Home() {
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
   const [historicalEquipmentSearch, setHistoricalEquipmentSearch] = useState("");
+  const [historicalTypeFilter, setHistoricalTypeFilter] = useState<"TODAS" | "PROGRAMADAS" | "CORRECTIVAS">("TODAS");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -316,9 +317,9 @@ export default function Home() {
   const bootstrap = trpc.maintenance.bootstrap.useQuery(undefined, {
     enabled: isAuthenticated,
   });
-  const historicalInput = useMemo(() => ({ equipmentQuery: historicalEquipmentSearch.trim() }), [historicalEquipmentSearch]);
+  const historicalInput = useMemo(() => ({ equipmentQuery: historicalEquipmentSearch.trim(), otType: historicalTypeFilter }), [historicalEquipmentSearch, historicalTypeFilter]);
   const historicalQuery = trpc.maintenance.historicalByEquipment.useQuery(historicalInput, {
-    enabled: Boolean(isAuthenticated && activeSection === "historico" && historicalInput.equipmentQuery.length > 0),
+    enabled: Boolean(isAuthenticated && (activeSection === "panel" || activeSection === "historico") && historicalInput.equipmentQuery.length > 0),
   });
   const loginUsers = trpc.auth.accessUsers.useQuery();
   const utils = trpc.useUtils();
@@ -1787,14 +1788,26 @@ export default function Home() {
                       <h2 className="mt-1 font-display text-2xl text-white">Histórico de OT por equipo</h2>
                       <p className="mt-1 text-sm text-slate-500">Busca un equipo para consultar sus OT de todas las semanas registradas.</p>
                     </div>
-                    <div className="relative w-full sm:w-80">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
-                      <input
-                        value={historicalEquipmentSearch}
-                        onChange={event => setHistoricalEquipmentSearch(event.target.value)}
-                        placeholder="Ej. CA05, CR02..."
-                        className="h-11 w-full rounded-xl border border-violet-300/20 bg-white/[0.035] pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-300/50"
-                      />
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                      <div className="relative w-full sm:w-80">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+                        <input
+                          value={historicalEquipmentSearch}
+                          onChange={event => setHistoricalEquipmentSearch(event.target.value)}
+                          placeholder="Ej. CA05, CR02..."
+                          className="h-11 w-full rounded-xl border border-violet-300/20 bg-white/[0.035] pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-violet-300/50"
+                        />
+                      </div>
+                      <select
+                        value={historicalTypeFilter}
+                        onChange={event => setHistoricalTypeFilter(event.target.value as typeof historicalTypeFilter)}
+                        className="h-11 rounded-xl border border-violet-300/20 bg-[#151e20] px-3 text-xs text-slate-300 outline-none focus:border-violet-300/50"
+                        aria-label="Filtrar histórico por tipo de OT"
+                      >
+                        <option value="TODAS">Todas las OT</option>
+                        <option value="PROGRAMADAS">Programadas</option>
+                        <option value="CORRECTIVAS">Correctivas</option>
+                      </select>
                     </div>
                   </div>
                   {!historicalInput.equipmentQuery ? (

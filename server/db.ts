@@ -5,7 +5,7 @@ import {
   maintenanceWeeks, otExecutions, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { hasReservation } from "../shared/maintenance";
+import { hasReservation, isCorrectiveWorkOrder } from "../shared/maintenance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
@@ -87,7 +87,7 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
 }
 
 export async function getOtHistory(workOrderId: number) { const db = await requireDb(); return db.select().from(otHistory).where(eq(otHistory.workOrderId, workOrderId)).orderBy(desc(otHistory.createdAt)); }
-export async function searchHistoricalWorkOrders(equipmentQuery: string) {
+export async function searchHistoricalWorkOrders(equipmentQuery: string, otType: "TODAS" | "PROGRAMADAS" | "CORRECTIVAS" = "TODAS") {
   const db = await requireDb();
   const query = equipmentQuery.trim();
   if (!query) return [];
@@ -97,14 +97,18 @@ export async function searchHistoricalWorkOrders(equipmentQuery: string) {
     .innerJoin(maintenanceWeeks, eq(workOrders.weekId, maintenanceWeeks.id))
     .where(and(eq(workOrders.isCancelled, false), like(equipment.code, `%${query}%`)))
     .orderBy(desc(maintenanceWeeks.year), desc(maintenanceWeeks.weekNumber), desc(workOrders.createdAt));
-  const ids = rows.map(row => row.workOrder.id);
+  const filteredRows = otType === "TODAS" ? rows : rows.filter(row => {
+    const corrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
+    return otType === "CORRECTIVAS" ? corrective : !corrective;
+  });
+  const ids = filteredRows.map(row => row.workOrder.id);
   const states = ids.length ? await db.select().from(otStates).where(inArray(otStates.workOrderId, ids)) : [];
   const latestState = new Map<number, (typeof states)[number]>();
   for (const state of states) {
     const current = latestState.get(state.workOrderId);
     if (!current || new Date(state.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) latestState.set(state.workOrderId, state);
   }
-  return rows.map(row => ({ ...row, state: latestState.get(row.workOrder.id) ?? null }));
+  return filteredRows.map(row => ({ ...row, state: latestState.get(row.workOrder.id) ?? null }));
 }
 export async function getLatestHandover(weekId: number, fromGuard: "A" | "B" | "C" | "D", toGuard: "A" | "B" | "C" | "D") {
   const db = await requireDb(); const [handover] = await db.select().from(handovers).where(and(eq(handovers.weekId, weekId), eq(handovers.fromGuard, fromGuard), eq(handovers.toGuard, toGuard))).orderBy(desc(handovers.createdAt)).limit(1);
