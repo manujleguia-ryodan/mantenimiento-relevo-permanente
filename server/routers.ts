@@ -397,7 +397,13 @@ export const appRouter = router({
           .limit(1);
         if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "Ya existe una OT con ese número en esta semana." });
         const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, equipmentCode)).limit(1);
-    const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code: equipmentCode, activo_en_taller: false }));
+        let equipmentId: number;
+        if (existingEquipment) {
+          equipmentId = existingEquipment.id;
+          await db.update(equipment).set({ activo_en_taller: true }).where(eq(equipment.id, equipmentId));
+        } else {
+          equipmentId = insertId(await db.insert(equipment).values({ code: equipmentCode, activo_en_taller: true }));
+        }
         const sourceData = JSON.stringify({
           Reserva: input.reservation ?? "",
           "Descripción de operación": input.description,
@@ -474,7 +480,12 @@ export const appRouter = router({
           let equipmentId = equipmentCache.get(code);
           if (!equipmentId) {
             const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, code)).limit(1);
-            equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code }));
+            if (existingEquipment) {
+              equipmentId = existingEquipment.id;
+              await db.update(equipment).set({ activo_en_taller: true }).where(eq(equipment.id, equipmentId));
+            } else {
+              equipmentId = insertId(await db.insert(equipment).values({ code, activo_en_taller: true }));
+            }
             equipmentCache.set(code, equipmentId);
           }
           await db.insert(workOrders).values({

@@ -409,7 +409,7 @@ export default function Home() {
   });
   const equipmentWorkshopMutation = trpc.maintenance.setEquipmentWorkshopStatus.useMutation({
     onSuccess: result => {
-      toast.success(result.active ? "Equipo ingresado a la guardia." : "Equipo removido de la guardia.");
+      toast.success(result.active ? "Equipo ingresado a la guardia." : "Equipo liberado de la guardia.");
       void utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
@@ -1507,7 +1507,7 @@ export default function Home() {
                               disabled={equipmentWorkshopMutation.isPending}
                               className="rounded-md border border-rose-300/25 px-2 py-1 text-[10px] font-semibold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
                             >
-                              Remover
+                              Liberar Equipo
                             </button>
                           )}
                         </div>
