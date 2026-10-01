@@ -36,6 +36,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import {
+  areAllWorkOrdersClosed,
   canReviewReception,
   hasReservation,
   validateReceptionInput,
@@ -539,6 +540,20 @@ export const appRouter = router({
         return getDashboardData(input.weekId, input.guard);
       }),
 
+    setEquipmentWorkshopStatus: facilitatorProcedure
+      .input(z.object({ equipmentId: z.number().int().positive(), active: z.boolean() }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        const [item] = await db.select({ id: equipment.id }).from(equipment).where(eq(equipment.id, input.equipmentId)).limit(1);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Equipo no encontrado." });
+        await db.update(equipment).set({ activo_en_taller: input.active }).where(eq(equipment.id, input.equipmentId));
+        if (!input.active) {
+          await db.delete(guardAssignments).where(eq(guardAssignments.equipmentId, input.equipmentId));
+          await db.delete(supervisorAssignments).where(eq(supervisorAssignments.equipmentId, input.equipmentId));
+        }
+        return { success: true, active: input.active } as const;
+      }),
+
     saveSupervisorAssignments: supervisorProcedure
       .input(z.object({ weekId: z.number().int().positive(), guard: guardSchema, equipmentIds: z.array(z.number().int().positive()) }))
       .mutation(async ({ input, ctx }) => {
@@ -665,7 +680,25 @@ export const appRouter = router({
           guard: input.guard,
           ...values,
         });
-        return { success: true, status };
+        let equipmentDeactivated = false;
+        if (input.closed) {
+          const relatedOrders = await db.select({ id: workOrders.id })
+            .from(workOrders)
+            .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.equipmentId, workOrder.equipmentId), eq(workOrders.isCancelled, false)));
+          const relatedIds = relatedOrders.map(item => item.id);
+          const relatedExecutions = relatedIds.length
+            ? await db.select({ status: otExecutions.status })
+              .from(otExecutions)
+              .where(and(eq(otExecutions.weekId, input.weekId), eq(otExecutions.guard, input.guard), inArray(otExecutions.workOrderId, relatedIds)))
+            : [];
+          if (relatedOrders.length && relatedExecutions.length === relatedOrders.length && areAllWorkOrdersClosed(relatedExecutions.map(item => item.status))) {
+            await db.update(equipment).set({ activo_en_taller: false }).where(eq(equipment.id, workOrder.equipmentId));
+            await db.delete(guardAssignments).where(eq(guardAssignments.equipmentId, workOrder.equipmentId));
+            await db.delete(supervisorAssignments).where(eq(supervisorAssignments.equipmentId, workOrder.equipmentId));
+            equipmentDeactivated = true;
+          }
+        }
+        return { success: true, status, equipmentDeactivated };
       }),
 
     history: sharedAccessProcedure

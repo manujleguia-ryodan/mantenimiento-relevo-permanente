@@ -407,6 +407,13 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const equipmentWorkshopMutation = trpc.maintenance.setEquipmentWorkshopStatus.useMutation({
+    onSuccess: result => {
+      toast.success(result.active ? "Equipo ingresado a la guardia." : "Equipo removido de la guardia.");
+      void utils.maintenance.dashboard.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
   const supervisorAssignmentMutation = trpc.maintenance.saveSupervisorAssignments.useMutation({
     onSuccess: result => {
       setSelectedEquipmentIds(result.selectedEquipmentIds);
@@ -426,9 +433,11 @@ export default function Home() {
   const executionMutation = trpc.maintenance.markOperationalExecution.useMutation({
     onSuccess: result => {
       toast.success(
-        result.status === "CERRADA_NOTIFICADA"
-          ? "OT cerrada y notificada."
-          : "OT reabierta para ejecución."
+        result.equipmentDeactivated
+          ? "OT cerrada. Todas las OT del equipo están cerradas y el equipo salió de la guardia."
+          : result.status === "CERRADA_NOTIFICADA"
+            ? "OT cerrada y notificada."
+            : "OT reabierta para ejecución."
       );
       void utils.maintenance.dashboard.invalidate();
     },
@@ -1463,10 +1472,15 @@ export default function Home() {
                       )}
                     </div>
                     {filteredEquipment.map(item => (
-                      <button
+                      <div
                         key={item.id}
-                        onClick={() => toggleEquipment(item.id)}
-                        disabled={!isFacilitator && !isSupervisor}
+                        onClick={() => (isFacilitator || isSupervisor) && toggleEquipment(item.id)}
+                        onKeyDown={event => {
+                          if ((event.key === "Enter" || event.key === " ") && (isFacilitator || isSupervisor)) toggleEquipment(item.id);
+                        }}
+                        role="button"
+                        tabIndex={isFacilitator || isSupervisor ? 0 : -1}
+                        aria-disabled={!isFacilitator && !isSupervisor}
                         className={`flex items-center justify-between rounded-xl border px-3 py-3 text-left transition disabled:cursor-default disabled:opacity-70 ${selectedEquipmentIds.includes(item.id) ? "border-amber-300/40 bg-amber-300/10 text-amber-100" : "border-white/[0.07] bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-white"}`}
                       >
                         <span>
@@ -1477,12 +1491,27 @@ export default function Home() {
                             {item.description || "Equipo operativo"}
                           </span>
                         </span>
-                        {selectedEquipmentIds.includes(item.id) && (
-                          <span className="grid h-5 w-5 place-items-center rounded-full bg-amber-300 text-[#0a0f10]">
-                            <Check className="h-3 w-3" />
-                          </span>
-                        )}
-                      </button>
+                        <div className="flex items-center gap-2">
+                          {selectedEquipmentIds.includes(item.id) && (
+                            <span className="grid h-5 w-5 place-items-center rounded-full bg-amber-300 text-[#0a0f10]">
+                              <Check className="h-3 w-3" />
+                            </span>
+                          )}
+                          {isFacilitator && (
+                            <button
+                              type="button"
+                              onClick={event => {
+                                event.stopPropagation();
+                                equipmentWorkshopMutation.mutate({ equipmentId: item.id, active: false });
+                              }}
+                              disabled={equipmentWorkshopMutation.isPending}
+                              className="rounded-md border border-rose-300/25 px-2 py-1 text-[10px] font-semibold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
+                            >
+                              Remover
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     ))}
                     {!filteredEquipment.length && allEquipment.length > 0 && (
                       <div className="col-span-full rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-500">
@@ -1655,7 +1684,19 @@ export default function Home() {
                                 {row.workOrder.otNumber}
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-sm text-amber-200/85">
-                                {row.equipment?.code ?? "—"}
+                                <div className="flex items-center gap-2">
+                                  <span>{row.equipment?.code ?? "—"}</span>
+                                  {isFacilitator && row.equipment && !row.equipment.activo_en_taller && (
+                                    <button
+                                      type="button"
+                                      onClick={() => equipmentWorkshopMutation.mutate({ equipmentId: row.equipment!.id, active: true })}
+                                      disabled={equipmentWorkshopMutation.isPending}
+                                      className={`rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:opacity-40 ${row.equipment.activo_en_taller ? "border-emerald-300/20 text-emerald-300 hover:bg-emerald-300/10" : "border-amber-300/25 text-amber-200 hover:bg-amber-300/10"}`}
+                                    >
+                                      {row.equipment.activo_en_taller ? "En guardia" : "Ingresar a Guardia"}
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                               <td className="whitespace-nowrap px-3 py-2.5">
                                 {isFacilitator && requiresLogistics && (

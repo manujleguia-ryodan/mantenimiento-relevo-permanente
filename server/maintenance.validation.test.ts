@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateReceptionPercent,
+  areAllWorkOrdersClosed,
   canReviewReception,
   filterActiveWorkshopEquipment,
   getPendingWarehouseLabel,
@@ -70,5 +71,11 @@ describe("maintenance business rules", () => {
       { code: "CA02", activo_en_taller: true },
       { code: "CA03" },
     ])).toEqual([{ code: "CA02", activo_en_taller: true }]);
+  });
+
+  it("purges a workshop equipment only when every related OT is closed", () => {
+    expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "CERRADA_NOTIFICADA"])).toBe(true);
+    expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "ABIERTA"])).toBe(false);
+    expect(areAllWorkOrdersClosed([])).toBe(false);
   });
 });

@@ -44,6 +44,10 @@ export function filterActiveWorkshopEquipment<T extends { activo_en_taller?: boo
   return equipment.filter(item => item.activo_en_taller === true);
 }
 
+export function areAllWorkOrdersClosed(statuses: Array<string | null | undefined>) {
+  return statuses.length > 0 && statuses.every(status => status === "CERRADA_NOTIFICADA");
+}
+
 export function canReviewReception(status?: ReceptionStatus | null) {
   return !status || status === "SIN_REVISAR";
 }
