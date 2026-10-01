@@ -350,7 +350,7 @@ export default function Home() {
   const importMutation = trpc.maintenance.importWeek.useMutation({
     onSuccess: result => {
       toast.success(
-        `Importación confirmada: ${result.otCount} OT y ${result.equipmentCount} equipos.`
+        `Importación confirmada: ${result.otCount} OT nuevas y ${result.equipmentCount} equipos nuevos${result.purgedCount ? ` · ${result.purgedCount} reprogramadas purgadas` : ""}.`
       );
       setShowImport(false);
       setImportPreview(null);

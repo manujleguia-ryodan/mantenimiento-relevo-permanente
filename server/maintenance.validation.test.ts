@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateReceptionPercent,
   areAllWorkOrdersClosed,
+  canPurgeSapRescheduledWorkOrder,
   canReviewReception,
   filterActiveWorkshopEquipment,
   getPendingWarehouseLabel,
@@ -77,5 +78,14 @@ describe("maintenance business rules", () => {
     expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "CERRADA_NOTIFICADA"])).toBe(true);
     expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "ABIERTA"])).toBe(false);
     expect(areAllWorkOrdersClosed([])).toBe(false);
+  });
+
+  it("purges only SAP OTs still sin revisar and keeps protected records", () => {
+    expect(canPurgeSapRescheduledWorkOrder({ isInNewExcel: false, isCorrective: false, equipmentActive: false, statuses: ["SIN_REVISAR"] })).toBe(true);
+    expect(canPurgeSapRescheduledWorkOrder({ isInNewExcel: true, isCorrective: false, equipmentActive: false, statuses: ["SIN_REVISAR"] })).toBe(false);
+    expect(canPurgeSapRescheduledWorkOrder({ isInNewExcel: false, isCorrective: true, equipmentActive: false, statuses: ["SIN_REVISAR"] })).toBe(false);
+    expect(canPurgeSapRescheduledWorkOrder({ isInNewExcel: false, isCorrective: false, equipmentActive: true, statuses: ["SIN_REVISAR"] })).toBe(false);
+    expect(canPurgeSapRescheduledWorkOrder({ isInNewExcel: false, isCorrective: false, equipmentActive: false, statuses: ["RECIBIDA"] })).toBe(false);
+    expect(canPurgeSapRescheduledWorkOrder({ isInNewExcel: false, isCorrective: false, equipmentActive: false, statuses: ["PARCIAL"] })).toBe(false);
   });
 });

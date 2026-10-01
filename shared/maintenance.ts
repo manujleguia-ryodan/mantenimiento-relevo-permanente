@@ -48,6 +48,16 @@ export function areAllWorkOrdersClosed(statuses: Array<string | null | undefined
   return statuses.length > 0 && statuses.every(status => status === "CERRADA_NOTIFICADA");
 }
 
+export function canPurgeSapRescheduledWorkOrder(input: {
+  isInNewExcel: boolean;
+  isCorrective: boolean;
+  equipmentActive: boolean;
+  statuses: Array<string | null | undefined>;
+}) {
+  if (input.isInNewExcel || input.isCorrective || input.equipmentActive) return false;
+  return input.statuses.every(status => status === "SIN_REVISAR");
+}
+
 export function canReviewReception(status?: ReceptionStatus | null) {
   return !status || status === "SIN_REVISAR";
 }

@@ -37,6 +37,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import {
   areAllWorkOrdersClosed,
+  canPurgeSapRescheduledWorkOrder,
   canReviewReception,
   hasReservation,
   validateReceptionInput,
@@ -304,27 +305,59 @@ export const appRouter = router({
             )
           )
           .limit(1);
-        if (already)
-          throw new TRPCError({
-            code: "CONFLICT",
-            message:
-              "La semana ya fue importada. Usa otra semana o archiva la importación anterior.",
-          });
-
-        const weekInsert = await db.insert(maintenanceWeeks).values({
+        const weekId = already?.id ?? insertId(await db.insert(maintenanceWeeks).values({
           label: input.label,
           weekNumber: input.weekNumber,
           year: input.year,
           sourceFileName: input.sourceFileName,
           importedById: ctx.user.id,
-        });
-        const weekId = insertId(weekInsert);
+        }));
         const equipmentCache = new Map<string, number>();
         const importedEquipmentIds: number[] = [];
         const seenOt = new Set<string>();
         let duplicateCount = 0;
         let equipmentCount = 0;
         let otCount = 0;
+        let purgedCount = 0;
+
+        const incomingOtNumbers = new Set(input.rows.map(row => row.otNumber.trim()));
+        if (already) {
+          const existingRows = await db
+            .select({ workOrder: workOrders, equipmentActive: equipment.activo_en_taller })
+            .from(workOrders)
+            .innerJoin(equipment, eq(workOrders.equipmentId, equipment.id))
+            .where(and(eq(workOrders.weekId, weekId), eq(workOrders.isCancelled, false)));
+
+          for (const existing of existingRows) {
+            if (incomingOtNumbers.has(existing.workOrder.otNumber)) continue;
+            if (existing.equipmentActive || correctiveSource(existing.workOrder.sourceData)) continue;
+
+            const states = await db
+              .select({ status: otStates.status })
+              .from(otStates)
+              .where(and(eq(otStates.workOrderId, existing.workOrder.id), eq(otStates.weekId, weekId)));
+            const canPurge = canPurgeSapRescheduledWorkOrder({
+              isInNewExcel: false,
+              isCorrective: Boolean(correctiveSource(existing.workOrder.sourceData)),
+              equipmentActive: existing.equipmentActive,
+              statuses: states.map(state => state.status),
+            });
+            if (!canPurge) continue;
+
+            const stateIds = await db
+              .select({ id: otStates.id })
+              .from(otStates)
+              .where(and(eq(otStates.workOrderId, existing.workOrder.id), eq(otStates.weekId, weekId)));
+            for (const state of stateIds) {
+              await db.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, state.id));
+              await db.delete(otHistory).where(eq(otHistory.otStateId, state.id));
+            }
+            await db.delete(otStates).where(and(eq(otStates.workOrderId, existing.workOrder.id), eq(otStates.weekId, weekId)));
+            await db.delete(otExecutions).where(and(eq(otExecutions.workOrderId, existing.workOrder.id), eq(otExecutions.weekId, weekId)));
+            await db.delete(workOrders).where(eq(workOrders.id, existing.workOrder.id));
+            purgedCount += 1;
+          }
+        }
 
         for (const row of input.rows) {
           const otNumber = row.otNumber.trim();
@@ -334,6 +367,16 @@ export const appRouter = router({
             continue;
           }
           seenOt.add(otNumber);
+
+          const [existingWorkOrder] = await db
+            .select({ id: workOrders.id })
+            .from(workOrders)
+            .where(and(eq(workOrders.weekId, weekId), eq(workOrders.otNumber, otNumber)))
+            .limit(1);
+          if (existingWorkOrder) {
+            duplicateCount += 1;
+            continue;
+          }
 
           let equipmentId = equipmentCache.get(equipmentCode);
           if (!equipmentId) {
@@ -367,16 +410,20 @@ export const appRouter = router({
           otCount += 1;
         }
 
-        await db.insert(guardAssignments).values(
-          buildGuardAssignmentRows(
-            weekId,
-            input.guard,
-            importedEquipmentIds,
-            ctx.user.id
-          )
-        );
+        for (const assignment of buildGuardAssignmentRows(weekId, input.guard, importedEquipmentIds, ctx.user.id)) {
+          const [existingAssignment] = await db
+            .select({ id: guardAssignments.id })
+            .from(guardAssignments)
+            .where(and(
+              eq(guardAssignments.weekId, assignment.weekId),
+              eq(guardAssignments.guard, assignment.guard),
+              eq(guardAssignments.equipmentId, assignment.equipmentId),
+            ))
+            .limit(1);
+          if (!existingAssignment) await db.insert(guardAssignments).values(assignment);
+        }
 
-        return { weekId, otCount, equipmentCount, duplicateCount };
+        return { weekId, otCount, equipmentCount, duplicateCount, purgedCount };
       }),
 
     createCorrectiveOt: facilitatorProcedure
