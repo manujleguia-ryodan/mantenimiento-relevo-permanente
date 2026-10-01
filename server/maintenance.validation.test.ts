@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateReceptionPercent,
   canReviewReception,
+  filterActiveWorkshopEquipment,
   getPendingWarehouseLabel,
   getReservationValue,
   hasReservation,
@@ -61,5 +62,13 @@ describe("maintenance business rules", () => {
     expect(isCorrectiveWorkOrder('{"Tipo":"Correctiva"}')).toBe(true);
     expect(isCorrectiveWorkOrder('{"Tipo":"Programada"}')).toBe(false);
     expect(isCorrectiveWorkOrder(null)).toBe(false);
+  });
+
+  it("shows only equipment explicitly marked active in the workshop", () => {
+    expect(filterActiveWorkshopEquipment([
+      { code: "CA01", activo_en_taller: false },
+      { code: "CA02", activo_en_taller: true },
+      { code: "CA03" },
+    ])).toEqual([{ code: "CA02", activo_en_taller: true }]);
   });
 });

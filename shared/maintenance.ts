@@ -40,6 +40,10 @@ export function isCorrectiveWorkOrder(sourceData?: string | null) {
   }
 }
 
+export function filterActiveWorkshopEquipment<T extends { activo_en_taller?: boolean | null }>(equipment: T[]) {
+  return equipment.filter(item => item.activo_en_taller === true);
+}
+
 export function canReviewReception(status?: ReceptionStatus | null) {
   return !status || status === "SIN_REVISAR";
 }

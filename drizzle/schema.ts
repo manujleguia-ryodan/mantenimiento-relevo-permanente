@@ -48,8 +48,7 @@ export const maintenanceWeeks = mysqlTable("maintenanceWeeks", {
 }));
 
 export const equipment = mysqlTable("equipment", {
-  id: int("id").autoincrement().primaryKey(), code: varchar("code", { length: 80 }).notNull(),
-  description: varchar("description", { length: 255 }), createdAt: timestamp("createdAt").defaultNow().notNull(),
+  id: int("id").autoincrement().primaryKey(), code: varchar("code", { length: 80 }).notNull(), description: varchar("description", { length: 255 }), activo_en_taller: boolean("activo_en_taller").default(false).notNull(), createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => ({ codeUnique: uniqueIndex("equipment_code_unique").on(table.code) }));
 
 export const warehouses = mysqlTable("warehouses", {
@@ -87,6 +86,19 @@ export const guardAssignments = mysqlTable("guardAssignments", {
 }, table => ({
   assignmentUnique: uniqueIndex("guardAssignments_unique").on(table.weekId, table.guard, table.equipmentId),
   lookupIdx: index("guardAssignments_lookup_idx").on(table.weekId, table.guard),
+}));
+
+/** Selección privada de equipos de cada Supervisor; no comparte asignaciones del Facilitador. */
+export const supervisorAssignments = mysqlTable("supervisorAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  supervisorName: varchar("supervisorName", { length: 160 }).notNull(),
+  weekId: int("weekId").notNull(),
+  guard: mysqlEnum("guard", ["A", "B", "C", "D"]).notNull(),
+  equipmentId: int("equipmentId").notNull(),
+  selectedAt: timestamp("selectedAt").defaultNow().notNull(),
+}, table => ({
+  assignmentUnique: uniqueIndex("supervisorAssignments_unique").on(table.supervisorName, table.weekId, table.guard, table.equipmentId),
+  lookupIdx: index("supervisorAssignments_lookup_idx").on(table.supervisorName, table.weekId, table.guard),
 }));
 
 export const otStates = mysqlTable("otStates", {

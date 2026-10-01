@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
-  InsertUser, equipment, guardAssignments, guardRelations, handoverItems, handovers,
+  InsertUser, equipment, guardAssignments, guardRelations, handoverItems, handovers, supervisorAssignments,
   maintenanceWeeks, otExecutions, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -32,7 +32,12 @@ export async function getEquipment() { const db = await requireDb(); return db.s
 export async function getWarehouses() { const db = await requireDb(); return db.select().from(warehouses).where(eq(warehouses.active, true)).orderBy(warehouses.name); }
 export async function getGuardRelations() { const db = await requireDb(); return db.select().from(guardRelations).orderBy(guardRelations.fromGuard); }
 
-export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | "D") {
+export async function getDashboardData(
+  weekId: number,
+  guard: "A" | "B" | "C" | "D",
+  viewerRole: "user" | "admin" | "facilitator" | "supervisor" | "viewer" = "facilitator",
+  supervisorName = ""
+) {
   const db = await requireDb();
   const [week] = await db.select().from(maintenanceWeeks).where(eq(maintenanceWeeks.id, weekId)).limit(1);
   if (!week) throw new Error("Semana no encontrada");
@@ -49,7 +54,9 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
   const weekEquipment = weekEquipmentIds.length
     ? await db.select().from(equipment).where(inArray(equipment.id, weekEquipmentIds)).orderBy(equipment.code)
     : [];
-  const selected = await db.select().from(guardAssignments).where(and(eq(guardAssignments.weekId, weekId), eq(guardAssignments.guard, guard)));
+  const selected = viewerRole === "supervisor"
+    ? await db.select().from(supervisorAssignments).where(and(eq(supervisorAssignments.supervisorName, supervisorName), eq(supervisorAssignments.weekId, weekId), eq(supervisorAssignments.guard, guard)))
+    : await db.select().from(guardAssignments).where(and(eq(guardAssignments.weekId, weekId), eq(guardAssignments.guard, guard)));
   const selectedIds = selected
     .map(item => item.equipmentId)
     .filter((id): id is number => Number.isSafeInteger(id) && id > 0);
@@ -58,7 +65,9 @@ export async function getDashboardData(weekId: number, guard: "A" | "B" | "C" | 
     .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId), eq(otStates.guard, guard)))
     .leftJoin(otExecutions, and(eq(otExecutions.workOrderId, workOrders.id), eq(otExecutions.weekId, weekId), eq(otExecutions.guard, guard)))
     .leftJoin(handovers, eq(otStates.inheritedFromHandoverId, handovers.id)).where(and(eq(workOrders.weekId, weekId), eq(workOrders.isCancelled, false)));
-  const visibleRows = selectedIds.length ? rows.filter(row => selectedIds.includes(row.workOrder.equipmentId)) : [];
+  // La vista maestra OT y recepción debe mostrar todas las OTs importadas de la semana.
+  // La selección operativa se aplica únicamente al catálogo de equipos de la vista de guardia.
+  const visibleRows = rows;
   const visibleWorkOrderIds = visibleRows.map(row => row.workOrder.id);
   const allStates = visibleWorkOrderIds.length
     ? await db.select().from(otStates).where(and(eq(otStates.weekId, weekId), inArray(otStates.workOrderId, visibleWorkOrderIds)))

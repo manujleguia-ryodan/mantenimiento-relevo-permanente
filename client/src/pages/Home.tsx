@@ -6,7 +6,7 @@ import {
   rowsFromExcelMatrix,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { canReviewReception, getReservationValue, hasReservation, isCorrectiveWorkOrder } from "@shared/maintenance";
+import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -227,6 +227,7 @@ export default function Home() {
   const assignedGuard = ((user as (typeof user & { guard?: Guard }) | null)?.guard) ?? "A";
   const isAdmin = user?.role === "admin";
   const isFacilitator = isAdmin || user?.role === "facilitator";
+  const isSupervisor = user?.role === "supervisor";
   const canCloseOt = isAdmin || user?.role === "supervisor";
   const isViewer = user?.role === "viewer";
   const roleLabel = isAdmin
@@ -245,7 +246,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "TODOS">("TODOS");
   const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
-  const [otTypeFilter, setOtTypeFilter] = useState<"PROGRAMADAS" | "CORRECTIVAS" | "TODAS">("PROGRAMADAS");
+  const [otTypeFilter, setOtTypeFilter] = useState<"PROGRAMADAS" | "CORRECTIVAS" | "TODAS">("TODAS");
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
   const [historicalEquipmentSearch, setHistoricalEquipmentSearch] = useState("");
@@ -406,6 +407,14 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const supervisorAssignmentMutation = trpc.maintenance.saveSupervisorAssignments.useMutation({
+    onSuccess: result => {
+      setSelectedEquipmentIds(result.selectedEquipmentIds);
+      void utils.maintenance.dashboard.invalidate();
+      toast.success("Tu selección privada de equipos fue actualizada.");
+    },
+    onError: error => toast.error(error.message),
+  });
   const receptionMutation = trpc.maintenance.updateReception.useMutation({
     onSuccess: () => {
       toast.success("Recepción actualizada y auditada.");
@@ -488,12 +497,16 @@ export default function Home() {
   const weeks = bootstrap.data?.weeks ?? [];
   const allEquipment =
     dashboard.data?.allEquipment ?? bootstrap.data?.equipment ?? [];
+  const operationalEquipment = useMemo(
+    () => filterActiveWorkshopEquipment(allEquipment),
+    [allEquipment]
+  );
   const filteredEquipment = useMemo(() => {
     const query = equipmentSearch.trim().toLowerCase();
-    return allEquipment.filter(item =>
+    return operationalEquipment.filter(item =>
       !query || `${item.code} ${item.description ?? ""}`.toLowerCase().includes(query)
     );
-  }, [allEquipment, equipmentSearch]);
+  }, [operationalEquipment, equipmentSearch]);
   const rows = dashboard.data?.rows ?? [];
   const excelColumns = useMemo(() => {
     const first = rows.find(row => row.workOrder.sourceData)?.workOrder
@@ -761,7 +774,7 @@ export default function Home() {
   }
 
   function toggleEquipment(id: number) {
-    if (!isFacilitator) return;
+    if (!isFacilitator && !isSupervisor) return;
     if (!Number.isSafeInteger(id) || id <= 0) return;
     const current = selectedEquipmentIds.filter(
       item => Number.isSafeInteger(item) && item > 0
@@ -770,16 +783,14 @@ export default function Home() {
       ? current.filter(item => item !== id)
       : [...current, id];
     setSelectedEquipmentIds(next);
-    if (selectedWeekId)
-      assignmentMutation.mutate({
-        weekId: selectedWeekId,
-        guard,
-        equipmentIds: next,
-      });
+    if (selectedWeekId) {
+      if (isSupervisor) supervisorAssignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
+      else assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
+    }
   }
 
   function setFilteredEquipmentSelected(selected: boolean) {
-    if (!isFacilitator || !selectedWeekId) return;
+    if ((!isFacilitator && !isSupervisor) || !selectedWeekId) return;
     const visibleIds = filteredEquipment
       .map(item => item.id)
       .filter(id => Number.isSafeInteger(id) && id > 0);
@@ -787,7 +798,8 @@ export default function Home() {
       ? Array.from(new Set([...selectedEquipmentIds, ...visibleIds]))
       : selectedEquipmentIds.filter(id => !visibleIds.includes(id));
     setSelectedEquipmentIds(next);
-    assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
+    if (isSupervisor) supervisorAssignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
+    else assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
   }
 
   function submitReception() {
@@ -1431,7 +1443,7 @@ export default function Home() {
                           className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-600"
                         />
                       </div>
-                      {isFacilitator && (
+                      {(isFacilitator || isSupervisor) && (
                         <div className="flex gap-2">
                           <button
                             onClick={() => setFilteredEquipmentSelected(true)}
@@ -1454,7 +1466,7 @@ export default function Home() {
                       <button
                         key={item.id}
                         onClick={() => toggleEquipment(item.id)}
-                        disabled={!isFacilitator}
+                        disabled={!isFacilitator && !isSupervisor}
                         className={`flex items-center justify-between rounded-xl border px-3 py-3 text-left transition disabled:cursor-default disabled:opacity-70 ${selectedEquipmentIds.includes(item.id) ? "border-amber-300/40 bg-amber-300/10 text-amber-100" : "border-white/[0.07] bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-white"}`}
                       >
                         <span>
@@ -1474,7 +1486,9 @@ export default function Home() {
                     ))}
                     {!filteredEquipment.length && allEquipment.length > 0 && (
                       <div className="col-span-full rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-500">
-                        No hay equipos que coincidan con la búsqueda.
+                        {equipmentSearch.trim()
+                          ? "No hay equipos activos que coincidan con la búsqueda."
+                          : "No hay equipos activos en taller. Esta vista se habilitará cuando activo_en_taller sea true."}
                       </div>
                     )}
                     {!allEquipment.length && (

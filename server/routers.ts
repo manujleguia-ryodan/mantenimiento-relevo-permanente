@@ -14,6 +14,7 @@ import {
   otHistory,
   otStatePendingWarehouses,
   otStates,
+  supervisorAssignments,
   users,
   warehouses,
   workOrders,
@@ -102,6 +103,12 @@ const operationalProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
       code: "FORBIDDEN",
       message: "Solo el Supervisor o Administrador puede cerrar o reabrir OTs.",
     });
+  return next({ ctx });
+});
+
+const supervisorProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin" && ctx.user.role !== "supervisor")
+    throw new TRPCError({ code: "FORBIDDEN", message: "Se requiere perfil Supervisor o Administrador." });
   return next({ ctx });
 });
 
@@ -261,7 +268,7 @@ export const appRouter = router({
       .input(
         z.object({ weekId: z.number().int().positive(), guard: guardSchema })
       )
-      .query(({ input }) => getDashboardData(input.weekId, input.guard)),
+      .query(({ input, ctx }) => getDashboardData(input.weekId, input.guard, ctx.user.role, ctx.user.name ?? "")),
 
     importWeek: facilitatorProcedure
       .input(
@@ -340,6 +347,7 @@ export const appRouter = router({
               const equipmentInsert = await db.insert(equipment).values({
                 code: equipmentCode,
                 description: row.equipmentDescription || null,
+                activo_en_taller: false,
               });
               equipmentId = insertId(equipmentInsert);
               equipmentCount += 1;
@@ -388,7 +396,7 @@ export const appRouter = router({
           .limit(1);
         if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "Ya existe una OT con ese número en esta semana." });
         const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, equipmentCode)).limit(1);
-        const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code: equipmentCode }));
+    const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code: equipmentCode, activo_en_taller: false }));
         const sourceData = JSON.stringify({
           Reserva: input.reservation ?? "",
           "Descripción de operación": input.description,
@@ -529,6 +537,32 @@ export const appRouter = router({
           );
         }
         return getDashboardData(input.weekId, input.guard);
+      }),
+
+    saveSupervisorAssignments: supervisorProcedure
+      .input(z.object({ weekId: z.number().int().positive(), guard: guardSchema, equipmentIds: z.array(z.number().int().positive()) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const weekEquipment = await db.select({ id: equipment.id })
+          .from(equipment)
+          .innerJoin(workOrders, eq(workOrders.equipmentId, equipment.id))
+          .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.isCancelled, false)));
+        const allowedEquipmentIds = new Set(weekEquipment.map(item => item.id));
+        if (input.equipmentIds.some(equipmentId => !allowedEquipmentIds.has(equipmentId))) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Solo puedes seleccionar equipos de la semana activa." });
+        }
+        const supervisorName = ctx.user.name ?? "Supervisor";
+        await db.delete(supervisorAssignments).where(and(
+          eq(supervisorAssignments.supervisorName, supervisorName),
+          eq(supervisorAssignments.weekId, input.weekId),
+          eq(supervisorAssignments.guard, input.guard),
+        ));
+        if (input.equipmentIds.length) {
+          await db.insert(supervisorAssignments).values(input.equipmentIds.map(equipmentId => ({
+            supervisorName, weekId: input.weekId, guard: input.guard, equipmentId,
+          })));
+        }
+        return getDashboardData(input.weekId, input.guard, "supervisor", supervisorName);
       }),
 
     updateReception: facilitatorProcedure
