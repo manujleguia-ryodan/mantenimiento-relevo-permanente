@@ -959,10 +959,10 @@ export default function Home() {
                 <div className="flex items-center justify-between border-b border-white/[0.07] pb-4">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                      Vista operacional
+                      Ejemplo visual
                     </div>
                     <div className="mt-1 font-display text-xl text-white">
-                      SEM 38 · GUARDIA 1
+                      DEMOSTRACIÓN · GUARDIA 1
                     </div>
                   </div>
                   <div className="rounded-xl bg-emerald-400/10 p-2 text-emerald-300">
@@ -975,7 +975,7 @@ export default function Home() {
                       OT totales
                     </div>
                     <div className="mt-2 font-display text-2xl text-white">
-                      35
+                      —
                     </div>
                   </div>
                   <div className="rounded-xl bg-white/[0.035] p-3">
@@ -983,7 +983,7 @@ export default function Home() {
                       Recibidas
                     </div>
                     <div className="mt-2 font-display text-2xl text-emerald-300">
-                      22
+                      —
                     </div>
                   </div>
                   <div className="rounded-xl bg-white/[0.035] p-3">
@@ -991,26 +991,26 @@ export default function Home() {
                       Pendientes
                     </div>
                     <div className="mt-2 font-display text-2xl text-rose-300">
-                      13
+                      —
                     </div>
                   </div>
                 </div>
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3">
                     <span className="font-mono text-xs text-slate-300">
-                      OT 452781 · CA26
+                      OT de ejemplo · CA26
                     </span>
                     <StatusPill status="RECIBIDA" />
                   </div>
                   <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3">
                     <span className="font-mono text-xs text-slate-300">
-                      OT 452782 · CA26
+                      OT de ejemplo · CA26
                     </span>
                     <StatusPill status="PARCIAL" />
                   </div>
                   <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3">
                     <span className="font-mono text-xs text-slate-300">
-                      OT 452783 · CA26
+                      OT de ejemplo · CA26
                     </span>
                     <StatusPill status="FALTA_RECIBIR" />
                   </div>
