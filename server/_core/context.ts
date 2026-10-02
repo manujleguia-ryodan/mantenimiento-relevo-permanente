@@ -1,6 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
+import { createSharedAccessUser, getSharedAccessGuard, getSharedAccessName, getSharedAccessRole, hasSharedAccess } from "../sharedAccess";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -17,7 +18,9 @@ export async function createContext(
     user = await sdk.authenticateRequest(opts.req);
   } catch (error) {
     // Authentication is optional for public procedures.
-    user = null;
+    user = hasSharedAccess(opts.req)
+      ? createSharedAccessUser(getSharedAccessRole(opts.req), new Date(), getSharedAccessGuard(opts.req), getSharedAccessName(opts.req))
+      : null;
   }
 
   return {

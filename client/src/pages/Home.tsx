@@ -22,6 +22,8 @@ import {
   HardHat,
   History,
   Import,
+  KeyRound,
+  LogOut,
   Menu,
   PackageCheck,
   PanelLeftClose,
@@ -49,6 +51,7 @@ import { toast } from "sonner";
 
 type Guard = "A" | "B" | "C" | "D";
 type Status = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RECIBIR";
+type AccessSession = { name: string; guard: Guard; role: "admin" | "facilitator" };
 
 const GUARDS: Guard[] = ["A", "B", "C", "D"];
 const GUARD_LABEL: Record<Guard, string> = { A: "1", B: "2", C: "3", D: "4" };
@@ -222,12 +225,21 @@ function KpiCard({
 }
 
 export default function Home() {
-  const operatorName = "Operador logístico";
-  const assignedGuard: Guard = "A";
-  const isFacilitator = true;
-  const canCloseOt = true;
+  const [session, setSession] = useState<AccessSession | null>(() => {
+    try {
+      const raw = window.localStorage.getItem("mantenimiento.session");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as AccessSession;
+      return parsed && typeof parsed.name === "string" && (parsed.role === "admin" || parsed.role === "facilitator") ? parsed : null;
+    } catch { return null; }
+  });
+  const [pin, setPin] = useState("");
+  const [loginError, setLoginError] = useState("");
   const [selectedWeekId, setSelectedWeekId] = useState<number | null>(null);
   const [guard, setGuard] = useState<Guard>("A");
+  const [newFacilitatorName, setNewFacilitatorName] = useState("");
+  const [newFacilitatorGuard, setNewFacilitatorGuard] = useState<Guard>("A");
+  const [newFacilitatorPin, setNewFacilitatorPin] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "TODOS">("TODOS");
   const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
@@ -293,19 +305,40 @@ export default function Home() {
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const operatorName = session?.name ?? "Operador logístico";
+  const assignedGuard: Guard = session?.guard ?? "A";
+  const isFacilitator = session?.role === "facilitator";
+  const canCloseOt = isFacilitator;
 
-  const bootstrap = trpc.maintenance.bootstrap.useQuery(undefined, {
-    enabled: true,
-  });
+  const bootstrap = trpc.maintenance.bootstrap.useQuery(undefined, { enabled: Boolean(session) });
+  const accessUsers = trpc.auth.accessUsers.useQuery(undefined, { enabled: session?.role === "admin" });
   const historicalInput = useMemo(() => ({ equipmentQuery: historicalEquipmentSearch.trim(), otType: historicalTypeFilter }), [historicalEquipmentSearch, historicalTypeFilter]);
   const historicalQuery = trpc.maintenance.historicalByEquipment.useQuery(historicalInput, {
     enabled: Boolean((activeSection === "panel" || activeSection === "historico") && historicalInput.equipmentQuery.length > 0),
   });
   const dashboard = trpc.maintenance.dashboard.useQuery(
     { weekId: selectedWeekId ?? 0, guard },
-    { enabled: Boolean(selectedWeekId) }
+    { enabled: Boolean(selectedWeekId && session?.role === "facilitator") }
   );
   const utils = trpc.useUtils();
+  const pinLoginMutation = trpc.auth.pinLogin.useMutation({
+    onSuccess: result => {
+      const next: AccessSession = { name: result.name ?? "Facilitador", guard: (result as any).guard ?? "A", role: result.role === "admin" ? "admin" : "facilitator" };
+      setSession(next);
+      window.localStorage.setItem("mantenimiento.session", JSON.stringify(next));
+      setPin("");
+      setLoginError("");
+    },
+    onError: error => { setLoginError(error.message); setPin(""); },
+  });
+  const createFacilitatorMutation = trpc.maintenance.createAccessCode.useMutation({
+    onSuccess: () => {
+      toast.success("Facilitador creado.");
+      setNewFacilitatorName(""); setNewFacilitatorPin("");
+      void utils.auth.accessUsers.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
   const history = trpc.maintenance.history.useQuery(
     { workOrderId: editingRow?.workOrder?.id ?? 0 },
     { enabled: Boolean(showHistory && editingRow?.workOrder?.id) }
@@ -791,9 +824,62 @@ export default function Home() {
     });
   }
 
+  function submitPin() {
+    if (!/^\d{4}$/.test(pin)) { setLoginError("Ingresa un PIN numérico de 4 dígitos."); return; }
+    pinLoginMutation.mutate({ pin });
+  }
+
+  function logout() {
+    window.localStorage.removeItem("mantenimiento.session");
+    setSession(null);
+    setActiveSection("panel");
+    setPin("");
+    setLoginError("");
+  }
+
   function scrollTo(section: string) {
     setActiveSection(section);
     setMobileMenuOpen(false);
+  }
+
+  if (!session) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#0a0f10] px-4 text-slate-200">
+        <div className="w-full max-w-sm rounded-3xl border border-white/[0.08] bg-[#101718] p-7 text-center shadow-2xl">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-amber-300 text-[#0a0f10]"><KeyRound className="h-7 w-7" /></div>
+          <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.25em] text-amber-300">Mantenimiento</p>
+          <h1 className="mt-2 font-display text-3xl text-white">Acceso operativo</h1>
+          <p className="mt-2 text-sm text-slate-500">Ingresa tu PIN de 4 dígitos para continuar.</p>
+          <input autoFocus inputMode="numeric" maxLength={4} type="password" value={pin} onChange={event => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))} onKeyDown={event => { if (event.key === "Enter") submitPin(); }} placeholder="••••" className="mt-6 h-14 w-full rounded-2xl border border-white/[0.1] bg-white/[0.04] text-center font-mono text-3xl tracking-[0.5em] text-white outline-none focus:border-amber-300/60" />
+          <button type="button" onClick={submitPin} disabled={pinLoginMutation.isPending || pin.length !== 4} className="mt-4 w-full rounded-2xl bg-amber-300 px-4 py-3 text-sm font-bold text-[#0a0f10] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-40">{pinLoginMutation.isPending ? "Validando…" : "Ingresar"}</button>
+          {loginError && <p className="mt-3 text-xs text-rose-300">{loginError}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if (session.role === "admin") {
+    const users = accessUsers.data ?? [];
+    return (
+      <div className="min-h-screen bg-[#0a0f10] px-4 py-8 text-slate-200">
+        <div className="mx-auto max-w-4xl">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300">Operando como: {session.name}</p><h1 className="mt-2 font-display text-4xl text-white">Gestión de Usuarios</h1><p className="mt-2 text-sm text-slate-500">Administra facilitadores y sus PINs sin mezclar esta lista con OTs o equipos.</p></div>
+            <button type="button" onClick={logout} className="inline-flex items-center gap-2 rounded-xl border border-white/[0.1] px-3 py-2 text-xs font-bold text-slate-300 hover:bg-white/[0.05]"><LogOut className="h-4 w-4" /> Cambiar Guardia / Salir</button>
+          </div>
+          <div className="mt-8 grid gap-5 lg:grid-cols-[1fr_1.4fr]">
+            <form onSubmit={event => { event.preventDefault(); if (!/^\d{4}$/.test(newFacilitatorPin) || newFacilitatorName.trim().length < 2) return toast.error("Nombre y PIN de 4 dígitos son obligatorios."); createFacilitatorMutation.mutate({ label: newFacilitatorName.trim(), role: "facilitator", guard: newFacilitatorGuard, pin: newFacilitatorPin }); }} className="rounded-2xl border border-white/[0.08] bg-[#101718] p-5">
+              <h2 className="font-display text-2xl text-white">Crear facilitador</h2>
+              <label className="mt-5 block text-xs font-bold uppercase tracking-wider text-slate-500">Nombre<input value={newFacilitatorName} onChange={event => setNewFacilitatorName(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-white outline-none" placeholder="Guardia 1" /></label>
+              <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500">Guardia<select value={newFacilitatorGuard} onChange={event => setNewFacilitatorGuard(event.target.value as Guard)} className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none">{GUARDS.map(item => <option key={item} value={item}>Guardia {GUARD_LABEL[item]}</option>)}</select></label>
+              <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500">PIN de 4 dígitos<input inputMode="numeric" maxLength={4} value={newFacilitatorPin} onChange={event => setNewFacilitatorPin(event.target.value.replace(/\D/g, "").slice(0, 4))} className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 font-mono text-lg tracking-[0.35em] text-white outline-none" placeholder="1234" /></label>
+              <button type="submit" disabled={createFacilitatorMutation.isPending} className="mt-5 w-full rounded-xl bg-amber-300 px-4 py-3 text-sm font-bold text-[#0a0f10] disabled:opacity-40">Guardar facilitador</button>
+            </form>
+            <div className="rounded-2xl border border-white/[0.08] bg-[#101718] p-5"><h2 className="font-display text-2xl text-white">Facilitadores activos</h2><div className="mt-4 space-y-2">{users.filter(user => user.id !== "admin").map(user => <div key={user.id} className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-4 py-3"><div><div className="font-semibold text-white">{user.label}</div><div className="text-xs text-slate-500">Guardia {GUARD_LABEL[user.guard as Guard]} · PIN protegido</div></div><span className="rounded-full bg-emerald-300/10 px-2 py-1 text-[10px] font-bold text-emerald-300">Activo</span></div>)}{users.filter(user => user.id !== "admin").length === 0 && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">Todavía no hay facilitadores creados.</div>}</div></div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -811,6 +897,7 @@ export default function Home() {
               <HardHat className="h-4 w-4" />
             </div>
             <span className="font-display text-lg text-white">RELEVO</span>
+            <button className="rounded-lg p-2 text-slate-300 hover:bg-white/5" onClick={logout} aria-label="Cambiar Guardia / Salir"><LogOut className="h-4 w-4" /></button>
           </div>
         </div>
       </header>
@@ -891,7 +978,7 @@ export default function Home() {
                   {operatorName}
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">
-                  Operación directa · Guardia ${GUARD_LABEL[assignedGuard]}
+                  Operando como: Guardia {GUARD_LABEL[assignedGuard]}
                 </div>
               </div>
             </div>
@@ -933,6 +1020,10 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+                  <div className="rounded-xl border border-emerald-300/15 bg-emerald-300/[0.06] px-3 py-2 text-xs text-emerald-200">
+                    Operando como: <b>{operatorName}</b> · Guardia {GUARD_LABEL[assignedGuard]}
+                  </div>
+                  <button type="button" onClick={logout} className="inline-flex items-center gap-2 rounded-xl border border-white/[0.1] px-3.5 py-2.5 text-xs font-bold text-slate-300 transition hover:bg-white/[0.05]"><LogOut className="h-4 w-4" /> Cambiar Guardia / Salir</button>
                   {isFacilitator && (
                     <button
                       onClick={() => setShowImport(true)}

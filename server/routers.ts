@@ -70,14 +70,21 @@ const statusSchema = z.enum([
 ]);
 const managedRoleSchema = z.enum(["admin", "facilitator", "supervisor", "viewer"]);
 
-// La aplicación es de uso interno para facilitadores logísticos: no hay login,
-// roles ni permisos en el flujo operativo. Se conservan estos alias para que
-// los procedimientos existentes sigan tipados mientras se migra el esquema legado.
 const sharedAccessProcedure = publicProcedure;
-const adminProcedure = publicProcedure;
-const facilitatorProcedure = publicProcedure;
-const operationalProcedure = publicProcedure;
-const supervisorProcedure = publicProcedure;
+const requireSession = publicProcedure.use(({ ctx, next }) => {
+  if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED", message: "Ingresa tu PIN para continuar." });
+  return next();
+});
+const adminProcedure = requireSession.use(({ ctx, next }) => {
+  if (ctx.user!.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Solo el PIN maestro puede gestionar usuarios." });
+  return next();
+});
+const facilitatorProcedure = requireSession.use(({ ctx, next }) => {
+  if (ctx.user!.role !== "admin" && ctx.user!.role !== "facilitator") throw new TRPCError({ code: "FORBIDDEN", message: "Esta acción requiere una sesión de Facilitador." });
+  return next();
+});
+const operationalProcedure = facilitatorProcedure;
+const supervisorProcedure = facilitatorProcedure;
 
 export function insertId(result: unknown) {
   const header = Array.isArray(result) ? result[0] : result;
@@ -141,7 +148,7 @@ export const appRouter = router({
       ];
     }),
     pinLogin: publicProcedure
-      .input(z.object({ pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128), selectedUserId: z.string().min(1).max(32).optional() }))
+      .input(z.object({ pin: z.string().regex(/^\d{4}$/, "El PIN debe tener exactamente 4 dígitos."), selectedUserId: z.string().min(1).max(32).optional() }))
       .mutation(async ({ ctx, input }) => {
         const configuredPin = getConfiguredSharedPin();
         const signingSecret = process.env.JWT_SECRET;
@@ -210,7 +217,7 @@ export const appRouter = router({
             maxAge: SHARED_ACCESS_TTL_MS,
           }
         );
-        return createSharedAccessUser(accessRole);
+        return createSharedAccessUser(accessRole, new Date(), accessGuard, accessName);
       }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
@@ -370,7 +377,7 @@ export const appRouter = router({
             otNumber,
             equipmentId,
             description: row.description || null,
-            sourceData: row.extra ? JSON.stringify(row.extra) : null,
+            sourceData: JSON.stringify({ ...(row.extra ?? {}), Responsable: ctx.user?.name ?? "Operador logístico" }),
           });
           otCount += 1;
         }
@@ -420,6 +427,7 @@ export const appRouter = router({
           Reserva: input.reservation ?? "",
           "Descripción de operación": input.description,
           Tipo: "Correctiva",
+          Responsable: ctx.user?.name ?? "Operador logístico",
         });
         const inserted = await db.insert(workOrders).values({
           weekId: input.weekId,
@@ -455,7 +463,7 @@ export const appRouter = router({
         reservation: z.string().trim().max(160).optional(),
         description: z.string().trim().min(1).max(10000),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
         const [current] = await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1);
         if (!current || current.isCancelled || !correctiveSource(current.sourceData)) throw new TRPCError({ code: "NOT_FOUND", message: "Solo se pueden editar OT correctivas manuales activas." });
@@ -464,7 +472,7 @@ export const appRouter = router({
         const code = input.equipmentCode.toUpperCase();
         const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, code)).limit(1);
         const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code }));
-        await db.update(workOrders).set({ otNumber: input.otNumber, equipmentId, description: input.description, sourceData: JSON.stringify({ Reserva: input.reservation ?? "", "Descripción de operación": input.description, Tipo: "Correctiva" }) }).where(eq(workOrders.id, input.workOrderId));
+        await db.update(workOrders).set({ otNumber: input.otNumber, equipmentId, description: input.description, sourceData: JSON.stringify({ Reserva: input.reservation ?? "", "Descripción de operación": input.description, Tipo: "Correctiva", Responsable: ctx.user?.name ?? "Operador logístico" }) }).where(eq(workOrders.id, input.workOrderId));
         return { success: true };
       }),
 
@@ -505,7 +513,7 @@ export const appRouter = router({
             otNumber: row.otNumber,
             equipmentId,
             description: row.description,
-            sourceData: JSON.stringify({ Reserva: row.reservation ?? "", "Descripción de operación": row.description, Tipo: "Correctiva" }),
+            sourceData: JSON.stringify({ Reserva: row.reservation ?? "", "Descripción de operación": row.description, Tipo: "Correctiva", Responsable: ctx.user?.name ?? "Operador logístico" }),
           });
           const [assignment] = await db.select({ id: guardAssignments.id }).from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.guard), eq(guardAssignments.equipmentId, equipmentId))).limit(1);
           if (!assignment) await db.insert(guardAssignments).values({ weekId: input.weekId, guard: input.guard, equipmentId, selectedById: ctx.user?.id ?? null });
@@ -565,11 +573,19 @@ export const appRouter = router({
 
     setEquipmentWorkshopStatus: facilitatorProcedure
       .input(z.object({ equipmentId: z.number().int().positive(), active: z.boolean() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
         const [item] = await db.select({ id: equipment.id }).from(equipment).where(eq(equipment.id, input.equipmentId)).limit(1);
         if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Equipo no encontrado." });
         await db.update(equipment).set({ activo_en_taller: input.active }).where(eq(equipment.id, input.equipmentId));
+        const relatedOrders = await db.select({ id: workOrders.id, sourceData: workOrders.sourceData }).from(workOrders).where(eq(workOrders.equipmentId, input.equipmentId));
+        for (const order of relatedOrders) {
+          let data: Record<string, unknown> = {};
+          try { data = order.sourceData ? JSON.parse(order.sourceData) : {}; } catch { data = {}; }
+          data["Última acción de equipo"] = input.active ? "Ingresar a Guardia" : "Liberar Equipo";
+          data.Responsable = ctx.user?.name ?? "Operador logístico";
+          await db.update(workOrders).set({ sourceData: JSON.stringify(data) }).where(eq(workOrders.id, order.id));
+        }
         if (!input.active) {
           await db.delete(guardAssignments).where(eq(guardAssignments.equipmentId, input.equipmentId));
           await db.delete(supervisorAssignments).where(eq(supervisorAssignments.equipmentId, input.equipmentId));
@@ -842,7 +858,7 @@ export const appRouter = router({
     }),
 
     createAccessCode: adminProcedure
-      .input(z.object({ label: z.string().trim().min(2).max(120), role: z.enum(["facilitator", "supervisor"]), guard: guardSchema, pin: z.string().min(SHARED_PIN_MIN_LENGTH).max(128) }))
+      .input(z.object({ label: z.string().trim().min(2).max(120), role: z.literal("facilitator"), guard: guardSchema, pin: z.string().regex(/^\d{4}$/, "El PIN debe tener exactamente 4 dígitos.") }))
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
         const { salt, hash } = hashAccessCode(input.pin);

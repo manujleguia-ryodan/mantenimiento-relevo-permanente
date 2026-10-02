@@ -5,15 +5,16 @@ import type { User } from "../drizzle/schema";
 
 export const SHARED_ACCESS_COOKIE = "mantenimiento_shared_access";
 export const SHARED_ACCESS_TTL_MS = 12 * 60 * 60 * 1000;
-export const SHARED_PIN_MIN_LENGTH = 8;
+export const SHARED_PIN_MIN_LENGTH = 4;
+export const MASTER_PIN = "9999";
 export const MAX_FAILED_PIN_ATTEMPTS = 8;
 export const PIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
 const failedPinAttempts = new Map<string, { count: number; resetAt: number }>();
 
 export function getConfiguredSharedPin(): string | null {
-  const pin = process.env.SHARED_ACCESS_PIN;
-  return pin && pin.length >= SHARED_PIN_MIN_LENGTH ? pin : null;
+  const pin = process.env.SHARED_ACCESS_PIN || MASTER_PIN;
+  return /^\d{4}$/.test(pin) ? pin : MASTER_PIN;
 }
 
 export function matchesSharedPin(
