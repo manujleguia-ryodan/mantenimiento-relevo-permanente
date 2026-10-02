@@ -70,49 +70,14 @@ const statusSchema = z.enum([
 ]);
 const managedRoleSchema = z.enum(["admin", "facilitator", "supervisor", "viewer"]);
 
-const sharedAccessProcedure = publicProcedure.use(({ ctx, next }) => {
-  const user =
-    ctx.user ?? (hasSharedAccess(ctx.req) ? createSharedAccessUser(getSharedAccessRole(ctx.req), new Date(), getSharedAccessGuard(ctx.req), getSharedAccessName(ctx.req)) : null);
-  if (!user)
-    throw new TRPCError({
-      code: "UNAUTHORIZED",
-      message: "Ingresa el PIN compartido para continuar.",
-    });
-  return next({ ctx: { ...ctx, user } });
-});
-
-const adminProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin")
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Se requiere perfil administrador",
-    });
-  return next({ ctx });
-});
-
-const facilitatorProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin" && ctx.user.role !== "facilitator")
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Se requiere perfil Facilitador o Administrador.",
-    });
-  return next({ ctx });
-});
-
-const operationalProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin" && ctx.user.role !== "supervisor")
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Solo el Supervisor o Administrador puede cerrar o reabrir OTs.",
-    });
-  return next({ ctx });
-});
-
-const supervisorProcedure = sharedAccessProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin" && ctx.user.role !== "supervisor")
-    throw new TRPCError({ code: "FORBIDDEN", message: "Se requiere perfil Supervisor o Administrador." });
-  return next({ ctx });
-});
+// La aplicación es de uso interno para facilitadores logísticos: no hay login,
+// roles ni permisos en el flujo operativo. Se conservan estos alias para que
+// los procedimientos existentes sigan tipados mientras se migra el esquema legado.
+const sharedAccessProcedure = publicProcedure;
+const adminProcedure = publicProcedure;
+const facilitatorProcedure = publicProcedure;
+const operationalProcedure = publicProcedure;
+const supervisorProcedure = publicProcedure;
 
 export function insertId(result: unknown) {
   const header = Array.isArray(result) ? result[0] : result;
@@ -138,7 +103,7 @@ export function buildGuardAssignmentRows(
   weekId: number,
   guard: "A" | "B" | "C" | "D",
   equipmentIds: number[],
-  selectedById: number
+  selectedById: number | null
 ) {
   const validEquipmentIds = equipmentIds.filter(
     (equipmentId): equipmentId is number =>
@@ -270,7 +235,7 @@ export const appRouter = router({
       .input(
         z.object({ weekId: z.number().int().positive(), guard: guardSchema })
       )
-      .query(({ input, ctx }) => getDashboardData(input.weekId, input.guard, ctx.user.role, ctx.user.name ?? "")),
+      .query(({ input, ctx }) => getDashboardData(input.weekId, input.guard, "facilitator", ctx.user?.name ?? "")),
 
     importWeek: facilitatorProcedure
       .input(
@@ -310,7 +275,7 @@ export const appRouter = router({
           weekNumber: input.weekNumber,
           year: input.year,
           sourceFileName: input.sourceFileName,
-          importedById: ctx.user.id,
+          importedById: ctx.user?.id ?? null,
         }));
         const equipmentCache = new Map<string, number>();
         const importedEquipmentIds: number[] = [];
@@ -410,7 +375,7 @@ export const appRouter = router({
           otCount += 1;
         }
 
-        for (const assignment of buildGuardAssignmentRows(weekId, input.guard, importedEquipmentIds, ctx.user.id)) {
+        for (const assignment of buildGuardAssignmentRows(weekId, input.guard, importedEquipmentIds, ctx.user?.id ?? null)) {
           const [existingAssignment] = await db
             .select({ id: guardAssignments.id })
             .from(guardAssignments)
@@ -476,7 +441,7 @@ export const appRouter = router({
             weekId: input.weekId,
             guard: input.guard,
             equipmentId,
-            selectedById: ctx.user.id,
+            selectedById: ctx.user?.id ?? null,
           });
         }
         return { success: true, workOrderId: insertId(inserted), equipmentId };
@@ -543,7 +508,7 @@ export const appRouter = router({
             sourceData: JSON.stringify({ Reserva: row.reservation ?? "", "Descripción de operación": row.description, Tipo: "Correctiva" }),
           });
           const [assignment] = await db.select({ id: guardAssignments.id }).from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.guard), eq(guardAssignments.equipmentId, equipmentId))).limit(1);
-          if (!assignment) await db.insert(guardAssignments).values({ weekId: input.weekId, guard: input.guard, equipmentId, selectedById: ctx.user.id });
+          if (!assignment) await db.insert(guardAssignments).values({ weekId: input.weekId, guard: input.guard, equipmentId, selectedById: ctx.user?.id ?? null });
           created += 1;
         }
         return { success: true, created, duplicates };
@@ -555,7 +520,7 @@ export const appRouter = router({
         const db = await requireDb();
         const [current] = await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1);
         if (!current || current.isCancelled || !correctiveSource(current.sourceData)) throw new TRPCError({ code: "NOT_FOUND", message: "Solo se pueden anular OT correctivas manuales activas." });
-        await db.update(workOrders).set({ isCancelled: true, cancelledAt: new Date(), cancelledById: ctx.user.id, cancellationReason: input.reason || "Anulada por el Facilitador" }).where(eq(workOrders.id, input.workOrderId));
+        await db.update(workOrders).set({ isCancelled: true, cancelledAt: new Date(), cancelledById: ctx.user?.id ?? null, cancellationReason: input.reason || "Anulada por el Facilitador" }).where(eq(workOrders.id, input.workOrderId));
         return { success: true };
       }),
 
@@ -591,7 +556,7 @@ export const appRouter = router({
               weekId: input.weekId,
               guard: input.guard,
               equipmentId,
-              selectedById: ctx.user.id,
+              selectedById: ctx.user?.id ?? null,
             }))
           );
         }
@@ -624,7 +589,7 @@ export const appRouter = router({
         if (input.equipmentIds.some(equipmentId => !allowedEquipmentIds.has(equipmentId))) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Solo puedes seleccionar equipos de la semana activa." });
         }
-        const supervisorName = ctx.user.name ?? "Supervisor";
+        const supervisorName = "Facilitador logístico";
         await db.delete(supervisorAssignments).where(and(
           eq(supervisorAssignments.supervisorName, supervisorName),
           eq(supervisorAssignments.weekId, input.weekId),
@@ -679,14 +644,14 @@ export const appRouter = router({
             message: "Esta OT ya fue recibida/revisada y no se puede revisar nuevamente.",
           });
         }
-        const responsibleName = input.responsibleName?.trim() || ctx.user.name || ctx.user.email || "Usuario actual";
+        const responsibleName = input.responsibleName?.trim() || ctx.user?.name || ctx.user?.email || "Usuario actual";
         const newPendingWarehouse = warehouseCodes.join(", ") || null;
         let stateId: number;
         await db.transaction(async tx => {
-          const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: ctx.user.role, note: input.note?.trim() || null, updatedById: ctx.user.id });
+          const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null });
           stateId = insertId(inserted);
           if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
-          await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user.id, actorName: ctx.user.name || ctx.user.email || "Usuario actual" });
+          await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user?.id ?? null, actorName: ctx.user?.name || ctx.user?.email || "Usuario actual" });
         });
         return { success: true, stateId: stateId! };
       }),
@@ -709,21 +674,11 @@ export const appRouter = router({
           .limit(1);
         if (!workOrder || workOrder.weekId !== input.weekId)
           throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
-        if (ctx.user.role === "supervisor" && input.closed) {
-          const [review] = await db.select({ status: otStates.status, reviewedByRole: otStates.reviewedByRole })
-            .from(otStates)
-            .where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard)))
-            .orderBy(desc(otStates.updatedAt))
-            .limit(1);
-          if (!review || review.status === "SIN_REVISAR" || (review.reviewedByRole !== "facilitator" && review.reviewedByRole !== "admin")) {
-            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "El Facilitador debe revisar esta OT antes de que el Supervisor pueda cerrarla." });
-          }
-        }
         const status = input.closed ? "CERRADA_NOTIFICADA" : "ABIERTA";
         const values = {
           status,
-          executedById: ctx.user.id,
-          executedByName: ctx.user.name || ctx.user.email || "Usuario actual",
+          executedById: ctx.user?.id ?? null,
+          executedByName: ctx.user?.name || ctx.user?.email || "Usuario actual",
           executedAt: new Date(),
         } as const;
         const [existing] = await db
@@ -781,20 +736,20 @@ export const appRouter = router({
         return db.transaction(async tx => {
           const [already] = await tx.select().from(handovers).where(and(eq(handovers.weekId, input.weekId), eq(handovers.fromGuard, input.fromGuard), eq(handovers.toGuard, input.toGuard), inArray(handovers.status, ["ENVIADO", "CONFIRMADO"]))).limit(1);
           if (already) throw new TRPCError({ code: "CONFLICT", message: "Este relevo ya fue generado o confirmado." });
-          const inserted = await tx.insert(handovers).values({ weekId: input.weekId, fromGuard: input.fromGuard, toGuard: input.toGuard, status: "ENVIADO", createdById: ctx.user.id });
+          const inserted = await tx.insert(handovers).values({ weekId: input.weekId, fromGuard: input.fromGuard, toGuard: input.toGuard, status: "ENVIADO", createdById: ctx.user?.id ?? null });
           const handoverId = insertId(inserted);
           for (const row of pendingRows) {
             const state = row.state!;
             const pendingWarehouses = row.pendingWarehouses.map(item => ({ code: item.warehouseCodeSnapshot, name: item.warehouseNameSnapshot }));
-            await tx.insert(handoverItems).values({ handoverId, otStateId: state.id, workOrderId: row.workOrder.id, statusSnapshot: state.status, pendingWarehousesSnapshot: JSON.stringify(pendingWarehouses), fromGuardSnapshot: input.fromGuard, toGuardSnapshot: input.toGuard, createdByIdSnapshot: ctx.user.id, createdAtSnapshot: new Date() });
+            await tx.insert(handoverItems).values({ handoverId, otStateId: state.id, workOrderId: row.workOrder.id, statusSnapshot: state.status, pendingWarehousesSnapshot: JSON.stringify(pendingWarehouses), fromGuardSnapshot: input.fromGuard, toGuardSnapshot: input.toGuard, createdByIdSnapshot: ctx.user?.id ?? null, createdAtSnapshot: new Date() });
             const [incoming] = await tx.select().from(otStates).where(and(eq(otStates.workOrderId, row.workOrder.id), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.toGuard))).limit(1);
             let incomingId = incoming?.id;
-            if (incoming) await tx.update(otStates).set({ status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user.id, updatedAt: new Date() }).where(eq(otStates.id, incoming.id));
-            else { const created = await tx.insert(otStates).values({ workOrderId: row.workOrder.id, weekId: input.weekId, guard: input.toGuard, status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user.id }); incomingId = insertId(created); }
+            if (incoming) await tx.update(otStates).set({ status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user?.id ?? null, updatedAt: new Date() }).where(eq(otStates.id, incoming.id));
+            else { const created = await tx.insert(otStates).values({ workOrderId: row.workOrder.id, weekId: input.weekId, guard: input.toGuard, status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user?.id ?? null }); incomingId = insertId(created); }
             await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, incomingId!));
             if (row.pendingWarehouses.length) await tx.insert(otStatePendingWarehouses).values(row.pendingWarehouses.map(item => ({ otStateId: incomingId!, warehouseId: item.warehouseId, warehouseCodeSnapshot: item.warehouseCodeSnapshot, warehouseNameSnapshot: item.warehouseNameSnapshot })));
             const [assignment] = await tx.select().from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.toGuard), eq(guardAssignments.equipmentId, row.workOrder.equipmentId))).limit(1);
-            if (!assignment) await tx.insert(guardAssignments).values({ weekId: input.weekId, guard: input.toGuard, equipmentId: row.workOrder.equipmentId, selectedById: ctx.user.id });
+            if (!assignment) await tx.insert(guardAssignments).values({ weekId: input.weekId, guard: input.toGuard, equipmentId: row.workOrder.equipmentId, selectedById: ctx.user?.id ?? null });
           }
           return { handoverId, pendingCount: pendingRows.length };
         });
@@ -820,7 +775,7 @@ export const appRouter = router({
           .update(handovers)
           .set({
             status: "CONFIRMADO",
-            confirmedById: ctx.user.id,
+            confirmedById: ctx.user?.id ?? null,
             confirmedAt: new Date(),
           })
           .where(eq(handovers.id, input.handoverId));
@@ -849,7 +804,7 @@ export const appRouter = router({
               .update(guardRelations)
               .set({
                 toGuard: relation.toGuard,
-                updatedById: ctx.user.id,
+                updatedById: ctx.user?.id ?? null,
                 updatedAt: new Date(),
               })
               .where(eq(guardRelations.id, existing.id));
@@ -857,7 +812,7 @@ export const appRouter = router({
             await db.insert(guardRelations).values({
               fromGuard: relation.fromGuard,
               toGuard: relation.toGuard,
-              updatedById: ctx.user.id,
+              updatedById: ctx.user?.id ?? null,
             });
           }
         }
@@ -891,7 +846,7 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
         const { salt, hash } = hashAccessCode(input.pin);
-        const inserted = await db.insert(accessCodes).values({ label: input.label, role: input.role, guard: input.guard, salt, codeHash: hash, createdById: ctx.user.id });
+        const inserted = await db.insert(accessCodes).values({ label: input.label, role: input.role, guard: input.guard, salt, codeHash: hash, createdById: ctx.user?.id ?? null });
         return { success: true, id: insertId(inserted) };
       }),
 

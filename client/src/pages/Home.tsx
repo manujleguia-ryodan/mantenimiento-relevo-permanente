@@ -1,4 +1,3 @@
-import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import {
   mapExcelRows,
@@ -23,7 +22,6 @@ import {
   HardHat,
   History,
   Import,
-  LogOut,
   Menu,
   PackageCheck,
   PanelLeftClose,
@@ -38,6 +36,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  Fragment,
   type ChangeEvent,
   type DragEvent,
   useEffect,
@@ -223,24 +222,10 @@ function KpiCard({
 }
 
 export default function Home() {
-  const { user, loading: authLoading, isAuthenticated, logout } = useAuth();
-  const assignedGuard = ((user as (typeof user & { guard?: Guard }) | null)?.guard) ?? "A";
-  const isAdmin = user?.role === "admin";
-  const isFacilitator = isAdmin || user?.role === "facilitator";
-  const isSupervisor = user?.role === "supervisor";
-  const canCloseOt = isAdmin || user?.role === "supervisor";
-  const isViewer = user?.role === "viewer";
-  const roleLabel = isAdmin
-    ? "Administrador"
-    : isFacilitator
-      ? "Facilitador"
-      : isViewer
-        ? "Visualizador"
-        : "Supervisor";
-  const [pin, setPin] = useState("");
-  const [selectedLoginUserId, setSelectedLoginUserId] = useState("admin");
-  const [showLoginPin, setShowLoginPin] = useState(false);
-  const [pinLoginError, setPinLoginError] = useState<string | null>(null);
+  const operatorName = "Operador logístico";
+  const assignedGuard: Guard = "A";
+  const isFacilitator = true;
+  const canCloseOt = true;
   const [selectedWeekId, setSelectedWeekId] = useState<number | null>(null);
   const [guard, setGuard] = useState<Guard>("A");
   const [search, setSearch] = useState("");
@@ -270,7 +255,6 @@ export default function Home() {
   const [correctiveReservation, setCorrectiveReservation] = useState("");
   const [correctiveDescription, setCorrectiveDescription] = useState("");
   const [showRelations, setShowRelations] = useState(false);
-  const [showAccessManagement, setShowAccessManagement] = useState(false);
   const [editingRow, setEditingRow] = useState<any | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showHandover, setShowHandover] = useState(false);
@@ -280,11 +264,6 @@ export default function Home() {
     []
   );
   const [equipmentSearch, setEquipmentSearch] = useState("");
-  const [newAccessLabel, setNewAccessLabel] = useState("");
-  const [newAccessPin, setNewAccessPin] = useState("");
-  const [showNewAccessPin, setShowNewAccessPin] = useState(false);
-  const [newAccessRole, setNewAccessRole] = useState<"facilitator" | "supervisor">("supervisor");
-  const [newAccessGuard, setNewAccessGuard] = useState<Guard>("A");
   const [relationsDraft, setRelationsDraft] = useState<
     Record<Guard, Guard | "">
   >({ A: "", B: "", C: "", D: "" });
@@ -316,37 +295,21 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const bootstrap = trpc.maintenance.bootstrap.useQuery(undefined, {
-    enabled: isAuthenticated,
+    enabled: true,
   });
   const historicalInput = useMemo(() => ({ equipmentQuery: historicalEquipmentSearch.trim(), otType: historicalTypeFilter }), [historicalEquipmentSearch, historicalTypeFilter]);
   const historicalQuery = trpc.maintenance.historicalByEquipment.useQuery(historicalInput, {
-    enabled: Boolean(isAuthenticated && (activeSection === "panel" || activeSection === "historico") && historicalInput.equipmentQuery.length > 0),
-  });
-  const loginUsers = trpc.auth.accessUsers.useQuery();
-  const utils = trpc.useUtils();
-  const pinLoginMutation = trpc.auth.pinLogin.useMutation({
-    onSuccess: async () => {
-      setPin("");
-      setPinLoginError(null);
-      await utils.auth.me.invalidate();
-    },
-    onError: error => setPinLoginError(error.message),
+    enabled: Boolean((activeSection === "panel" || activeSection === "historico") && historicalInput.equipmentQuery.length > 0),
   });
   const dashboard = trpc.maintenance.dashboard.useQuery(
     { weekId: selectedWeekId ?? 0, guard },
-    { enabled: Boolean(isAuthenticated && selectedWeekId) }
+    { enabled: Boolean(selectedWeekId) }
   );
+  const utils = trpc.useUtils();
   const history = trpc.maintenance.history.useQuery(
     { workOrderId: editingRow?.workOrder?.id ?? 0 },
     { enabled: Boolean(showHistory && editingRow?.workOrder?.id) }
   );
-  const accessUsers = trpc.maintenance.listUsers.useQuery(undefined, {
-    enabled: Boolean(isAdmin && showAccessManagement),
-  });
-  const accessCodes = trpc.maintenance.listAccessCodes.useQuery(undefined, {
-    enabled: Boolean(isAdmin && showAccessManagement),
-  });
-
   const importMutation = trpc.maintenance.importWeek.useMutation({
     onSuccess: result => {
       toast.success(
@@ -414,14 +377,6 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
-  const supervisorAssignmentMutation = trpc.maintenance.saveSupervisorAssignments.useMutation({
-    onSuccess: result => {
-      setSelectedEquipmentIds(result.selectedEquipmentIds);
-      void utils.maintenance.dashboard.invalidate();
-      toast.success("Tu selección privada de equipos fue actualizada.");
-    },
-    onError: error => toast.error(error.message),
-  });
   const receptionMutation = trpc.maintenance.updateReception.useMutation({
     onSuccess: () => {
       toast.success("Recepción actualizada y auditada.");
@@ -472,36 +427,7 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
-  const userRoleMutation = trpc.maintenance.updateUserRole.useMutation({
-    onSuccess: () => {
-      toast.success("Rol de usuario actualizado.");
-      void accessUsers.refetch();
-    },
-    onError: error => toast.error(error.message),
-  });
-  const createAccessCodeMutation = trpc.maintenance.createAccessCode.useMutation({
-    onSuccess: () => {
-      toast.success("Usuario y PIN creados.");
-      setNewAccessLabel("");
-      setNewAccessPin("");
-      void accessCodes.refetch();
-    },
-    onError: error => toast.error(error.message),
-  });
-  const revokeAccessCodeMutation = trpc.maintenance.revokeAccessCode.useMutation({
-    onSuccess: () => {
-      toast.success("Acceso desactivado.");
-      void accessCodes.refetch();
-    },
-    onError: error => toast.error(error.message),
-  });
-  const updateAccessCodeGuardMutation = trpc.maintenance.updateAccessCodeGuard.useMutation({
-    onSuccess: () => {
-      toast.success("Guardia del usuario actualizada.");
-      void accessCodes.refetch();
-    },
-    onError: error => toast.error(error.message),
-  });
+
 
   const weeks = bootstrap.data?.weeks ?? [];
   const allEquipment =
@@ -562,8 +488,8 @@ export default function Home() {
   );
 
   useEffect(() => {
-    if (!isAdmin) setGuard(assignedGuard);
-  }, [assignedGuard, isAdmin]);
+    setGuard(assignedGuard);
+  }, [assignedGuard]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
@@ -632,6 +558,17 @@ export default function Home() {
     });
   }, [rows, search, statusFilter, warehouseFilter, executionFilter, otTypeFilter]);
 
+  const groupedRows = useMemo(() => {
+    const groups = new Map<string, { key: string; equipment: (typeof filteredRows)[number]["equipment"]; rows: typeof filteredRows }>();
+    for (const row of filteredRows) {
+      const key = row.equipment ? String(row.equipment.id) : "sin-equipo";
+      const existing = groups.get(key);
+      if (existing) existing.rows.push(row);
+      else groups.set(key, { key, equipment: row.equipment, rows: [row] });
+    }
+    return Array.from(groups.values());
+  }, [filteredRows]);
+
   const otTypeCounts = useMemo(() => rows.reduce(
     (counts, row) => {
       const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
@@ -676,7 +613,7 @@ export default function Home() {
     setEditingRow(row);
     setStatusDraft((row.state?.status ?? "SIN_REVISAR") as Status);
     setWarehouseCodesDraft((row.pendingWarehouses ?? []).map((item: any) => item.warehouseCodeSnapshot));
-    setResponsibleDraft(user?.name ?? "Usuario actual");
+    setResponsibleDraft(operatorName);
     setNoteDraft(row.state?.note ?? "");
     setShowHistory(false);
   }
@@ -783,7 +720,6 @@ export default function Home() {
   }
 
   function toggleEquipment(id: number) {
-    if (!isFacilitator && !isSupervisor) return;
     if (!Number.isSafeInteger(id) || id <= 0) return;
     const current = selectedEquipmentIds.filter(
       item => Number.isSafeInteger(item) && item > 0
@@ -793,13 +729,12 @@ export default function Home() {
       : [...current, id];
     setSelectedEquipmentIds(next);
     if (selectedWeekId) {
-      if (isSupervisor) supervisorAssignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
-      else assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
+      assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
     }
   }
 
   function setFilteredEquipmentSelected(selected: boolean) {
-    if ((!isFacilitator && !isSupervisor) || !selectedWeekId) return;
+    if (!selectedWeekId) return;
     const visibleIds = filteredEquipment
       .map(item => item.id)
       .filter(id => Number.isSafeInteger(id) && id > 0);
@@ -807,8 +742,7 @@ export default function Home() {
       ? Array.from(new Set([...selectedEquipmentIds, ...visibleIds]))
       : selectedEquipmentIds.filter(id => !visibleIds.includes(id));
     setSelectedEquipmentIds(next);
-    if (isSupervisor) supervisorAssignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
-    else assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
+    assignmentMutation.mutate({ weekId: selectedWeekId, guard, equipmentIds: next });
   }
 
   function submitReception() {
@@ -848,179 +782,6 @@ export default function Home() {
   function scrollTo(section: string) {
     setActiveSection(section);
     setMobileMenuOpen(false);
-    document
-      .getElementById(section)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-[#0a0f10] text-slate-300 grid place-items-center">
-        <RefreshCw className="h-5 w-5 animate-spin text-amber-300" />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen overflow-hidden bg-[#0a0f10] text-slate-200">
-        <div className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-12">
-          <div className="grid w-full gap-12 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-            <div>
-              <div className="mb-8 flex items-center gap-3">
-                <div className="grid h-11 w-11 place-items-center rounded-2xl bg-amber-300 text-[#0a0f10]">
-                  <HardHat className="h-6 w-6" />
-                </div>
-                <span className="font-display text-xl font-semibold tracking-wide">
-                  MANTENIMIENTO / RELEVO
-                </span>
-              </div>
-              <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />{" "}
-                Control operacional
-              </div>
-              <h1 className="max-w-2xl font-display text-5xl font-semibold leading-[0.95] tracking-tight text-white sm:text-7xl">
-                El relevo crítico,
-                <br />
-                <span className="text-amber-300">sin perder una OT.</span>
-              </h1>
-              <p className="mt-7 max-w-xl text-base leading-7 text-slate-400">
-                Una capa rápida sobre SAP para importar la semana, revisar la
-                recepción global de repuestos y entregar pendientes con
-                trazabilidad. El Administrador crea un PIN para cada Facilitador
-                o Supervisor; no se requiere correo.
-              </p>
-              <form
-                className="mt-9 flex max-w-xl flex-col gap-3 sm:flex-row"
-                onSubmit={event => {
-                  event.preventDefault();
-                  setPinLoginError(null);
-                  pinLoginMutation.mutate({ pin, selectedUserId: selectedLoginUserId });
-                }}
-              >
-                <select
-                  aria-label="Seleccionar usuario"
-                  value={selectedLoginUserId}
-                  onChange={event => setSelectedLoginUserId(event.target.value)}
-                  className="h-12 w-full rounded-xl border border-white/10 bg-[#121a1c] px-4 text-sm text-white outline-none transition focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/20 sm:w-64"
-                >
-                  {(loginUsers.data ?? [{ id: "admin", label: "Administrador", role: "admin", guard: "A" }]).map(loginUser => (
-                    <option key={loginUser.id} value={loginUser.id}>
-                      {loginUser.label}{loginUser.role === "admin" ? " · Administrador" : ` · Guardia ${loginUser.guard === "A" ? "1" : loginUser.guard === "B" ? "2" : loginUser.guard === "C" ? "3" : "4"}`}
-                    </option>
-                  ))}
-                </select>
-                <div className="relative min-w-0 flex-1">
-                  <input
-                    aria-label="PIN o código de acceso"
-                    autoComplete="current-password"
-                    className="w-full rounded-xl border border-white/10 bg-[#121a1c] px-4 py-3 pr-12 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/20 disabled:opacity-60"
-                    maxLength={128}
-                    minLength={8}
-                    onChange={event => setPin(event.target.value)}
-                    placeholder="PIN o código de acceso"
-                    required
-                    type={showLoginPin ? "text" : "password"}
-                    value={pin}
-                  />
-                  <button
-                    type="button"
-                    aria-label={showLoginPin ? "Ocultar PIN" : "Mostrar PIN"}
-                    title={showLoginPin ? "Ocultar PIN" : "Mostrar PIN"}
-                    onClick={() => setShowLoginPin(current => !current)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-amber-200"
-                  >
-                    {showLoginPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <button
-                  className="inline-flex items-center justify-center gap-3 rounded-xl bg-amber-300 px-5 py-3 text-sm font-bold text-[#0a0f10] shadow-[0_10px_35px_rgba(245,185,66,0.22)] transition hover:bg-amber-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={pinLoginMutation.isPending || pin.length < 8}
-                  type="submit"
-                >
-                  {pinLoginMutation.isPending ? (
-                    "Validando PIN…"
-                  ) : (
-                    <>
-                      Ingresar con PIN <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
-                </button>
-              </form>
-              {pinLoginError && (
-                <p className="mt-3 text-sm text-rose-300" role="alert">
-                  {pinLoginError}
-                </p>
-              )}
-            </div>
-            <div className="relative">
-              <div className="absolute -inset-8 rounded-full bg-amber-300/10 blur-3xl" />
-              <div className="relative rounded-[2rem] border border-white/10 bg-[#121a1c] p-5 shadow-2xl">
-                <div className="flex items-center justify-between border-b border-white/[0.07] pb-4">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                      Ejemplo visual
-                    </div>
-                    <div className="mt-1 font-display text-xl text-white">
-                      DEMOSTRACIÓN · GUARDIA 1
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-emerald-400/10 p-2 text-emerald-300">
-                    <ShieldCheck className="h-5 w-5" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-3 py-5">
-                  <div className="rounded-xl bg-white/[0.035] p-3">
-                    <div className="text-[10px] uppercase text-slate-500">
-                      OT totales
-                    </div>
-                    <div className="mt-2 font-display text-2xl text-white">
-                      —
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-white/[0.035] p-3">
-                    <div className="text-[10px] uppercase text-slate-500">
-                      Recibidas
-                    </div>
-                    <div className="mt-2 font-display text-2xl text-emerald-300">
-                      —
-                    </div>
-                  </div>
-                  <div className="rounded-xl bg-white/[0.035] p-3">
-                    <div className="text-[10px] uppercase text-slate-500">
-                      Pendientes
-                    </div>
-                    <div className="mt-2 font-display text-2xl text-rose-300">
-                      —
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3">
-                    <span className="font-mono text-xs text-slate-300">
-                      OT de ejemplo · CA26
-                    </span>
-                    <StatusPill status="RECIBIDA" />
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3">
-                    <span className="font-mono text-xs text-slate-300">
-                      OT de ejemplo · CA26
-                    </span>
-                    <StatusPill status="PARCIAL" />
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3">
-                    <span className="font-mono text-xs text-slate-300">
-                      OT de ejemplo · CA26
-                    </span>
-                    <StatusPill status="FALTA_RECIBIR" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -1039,12 +800,6 @@ export default function Home() {
             </div>
             <span className="font-display text-lg text-white">RELEVO</span>
           </div>
-          <button
-            className="rounded-lg p-2 text-slate-300 hover:bg-white/5"
-            onClick={() => logout()}
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
         </div>
       </header>
       <div className="mx-auto flex max-w-[1560px]">
@@ -1113,35 +868,20 @@ export default function Home() {
                 <span className={sidebarCollapsed ? "lg:hidden" : ""}>Importar Excel semanal</span>
               </button>
             )}
-            {isAdmin && (
-              <button
-                onClick={() => setShowAccessManagement(true)}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-400 transition hover:bg-white/[0.04] hover:text-white ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
-              >
-                <ShieldCheck className="h-4 w-4" />
-                <span className={sidebarCollapsed ? "lg:hidden" : ""}>Gestionar accesos</span>
-              </button>
-            )}
           </nav>
           <div className={`absolute bottom-5 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 ${sidebarCollapsed ? "left-2 right-2 lg:p-2" : "left-4 right-4"}`}>
             <div className={`flex items-center gap-3 ${sidebarCollapsed ? "lg:justify-center" : ""}`}>
               <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-700 text-sm font-bold text-white">
-                {(user?.name ?? "U").slice(0, 1).toUpperCase()}
+                {operatorName.slice(0, 1).toUpperCase()}
               </div>
               <div className={`min-w-0 flex-1 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
                 <div className="truncate text-sm font-semibold text-white">
-                  {user?.name ?? "Usuario"}
+                  {operatorName}
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">
-                  {roleLabel}{!isAdmin && ` · Guardia ${GUARD_LABEL[assignedGuard]}`}
+                  Operación directa · Guardia ${GUARD_LABEL[assignedGuard]}
                 </div>
               </div>
-              <button
-                className={sidebarCollapsed ? "lg:hidden" : "rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white"}
-                onClick={() => logout()}
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
             </div>
           </div>
         </aside>
@@ -1225,7 +965,7 @@ export default function Home() {
                     </select>
                   </div>
                   <div className="flex items-center gap-1 rounded-xl bg-white/[0.04] p-1">
-                    {GUARDS.filter(item => isAdmin || item === assignedGuard).map(item => (
+                    {GUARDS.map(item => (
                       <button
                         key={item}
                         onClick={() => setGuard(item)}
@@ -1420,9 +1160,9 @@ export default function Home() {
                   </div>
                 </section>
 
-                <section
+                {activeSection === "equipos" && <section
                   id="equipos"
-                  className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-5"
+                  className="mt-6 rounded-2xl border border-white/[0.07] bg-[#101718] p-5"
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
@@ -1452,7 +1192,7 @@ export default function Home() {
                           className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-600"
                         />
                       </div>
-                      {(isFacilitator || isSupervisor) && (
+                      {isFacilitator && (
                         <div className="flex gap-2">
                           <button
                             onClick={() => setFilteredEquipmentSelected(true)}
@@ -1474,13 +1214,13 @@ export default function Home() {
                     {filteredEquipment.map(item => (
                       <div
                         key={item.id}
-                        onClick={() => (isFacilitator || isSupervisor) && toggleEquipment(item.id)}
+                        onClick={() => toggleEquipment(item.id)}
                         onKeyDown={event => {
-                          if ((event.key === "Enter" || event.key === " ") && (isFacilitator || isSupervisor)) toggleEquipment(item.id);
+                          if (event.key === "Enter" || event.key === " ") toggleEquipment(item.id);
                         }}
                         role="button"
-                        tabIndex={isFacilitator || isSupervisor ? 0 : -1}
-                        aria-disabled={!isFacilitator && !isSupervisor}
+                        tabIndex={isFacilitator ? 0 : -1}
+                        aria-disabled={!isFacilitator}
                         className={`flex items-center justify-between rounded-xl border px-3 py-3 text-left transition disabled:cursor-default disabled:opacity-70 ${selectedEquipmentIds.includes(item.id) ? "border-amber-300/40 bg-amber-300/10 text-amber-100" : "border-white/[0.07] bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-white"}`}
                       >
                         <span>
@@ -1526,9 +1266,9 @@ export default function Home() {
                       </div>
                     )}
                   </div>
-                </section>
+                </section>}
 
-                <section
+                {activeSection === "ot" && <section
                   id="ot"
                   className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-4"
                 >
@@ -1659,7 +1399,32 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/[0.05]">
-                        {filteredRows.map(row => {
+                        {groupedRows.map(group => (
+                          <Fragment key={group.key}>
+                            <tr className="border-y border-amber-300/10 bg-amber-300/[0.045]">
+                              <td colSpan={7 + excelColumns.length} className="px-4 py-3">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div className="flex items-center gap-3">
+                                    <Truck className="h-4 w-4 text-amber-300" />
+                                    <div>
+                                      <div className="font-mono text-sm font-bold text-amber-100">{group.equipment?.code ?? "SIN_EQUIPO"}</div>
+                                      <div className="text-[11px] text-slate-500">{group.equipment?.description || "Equipo sin descripción"} · {group.rows.length} OT asociada{group.rows.length === 1 ? "" : "s"}</div>
+                                    </div>
+                                  </div>
+                                  {group.equipment && !group.equipment.activo_en_taller && (
+                                    <button
+                                      type="button"
+                                      onClick={() => equipmentWorkshopMutation.mutate({ equipmentId: group.equipment!.id, active: true })}
+                                      disabled={equipmentWorkshopMutation.isPending}
+                                      className="rounded-lg border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-[11px] font-bold text-amber-200 transition hover:bg-amber-300/20 disabled:opacity-40"
+                                    >
+                                      Ingresar a Guardia · {group.rows.length} OT
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                            {group.rows.map(row => {
                           const state = (row.state?.status ??
                             "SIN_REVISAR") as Status;
                           const fields = getImportedFields(
@@ -1684,19 +1449,7 @@ export default function Home() {
                                 {row.workOrder.otNumber}
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-sm text-amber-200/85">
-                                <div className="flex items-center gap-2">
-                                  <span>{row.equipment?.code ?? "—"}</span>
-                                  {isFacilitator && row.equipment && !row.equipment.activo_en_taller && (
-                                    <button
-                                      type="button"
-                                      onClick={() => equipmentWorkshopMutation.mutate({ equipmentId: row.equipment!.id, active: true })}
-                                      disabled={equipmentWorkshopMutation.isPending}
-                                      className={`rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:opacity-40 ${row.equipment.activo_en_taller ? "border-emerald-300/20 text-emerald-300 hover:bg-emerald-300/10" : "border-amber-300/25 text-amber-200 hover:bg-amber-300/10"}`}
-                                    >
-                                      {row.equipment.activo_en_taller ? "En guardia" : "Ingresar a Guardia"}
-                                    </button>
-                                  )}
-                                </div>
+                                <span>{row.equipment?.code ?? "—"}</span>
                               </td>
                               <td className="whitespace-nowrap px-3 py-2.5">
                                 {isFacilitator && requiresLogistics && (
@@ -1807,7 +1560,9 @@ export default function Home() {
                               </td>
                             </tr>
                           );
-                        })}
+                            })}
+                          </Fragment>
+                        ))}
                       </tbody>
                     </table>
                     {!filteredRows.length && (
@@ -1832,9 +1587,9 @@ export default function Home() {
                       Click en “Revisar” para registrar recepción e historial
                     </span>
                   </div>
-                </section>
+                </section>}
 
-                <section id="historico" className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-5">
+                {activeSection === "historico" && <section id="historico" className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-5">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
                       <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-300">
@@ -1905,7 +1660,7 @@ export default function Home() {
                   ) : (
                     <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No se encontraron OT para ese equipo.</div>
                   )}
-                </section>
+                </section>}
 
                 {false && isFacilitator && <section
                   id="relevo"
@@ -2534,180 +2289,6 @@ export default function Home() {
                   </button>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isAdmin && showAccessManagement && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/10 bg-[#11191a] shadow-2xl">
-            <div className="flex items-start justify-between border-b border-white/[0.07] p-5">
-              <div>
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Administración
-                </div>
-                <h2 className="mt-1 font-display text-2xl text-white">
-                  Gestionar accesos
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Crea el usuario, define su PIN y entrégale el acceso de su página.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowAccessManagement(false)}
-                className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-5">
-              <form
-                onSubmit={event => {
-                  event.preventDefault();
-                  if (newAccessPin.length < 8 || !newAccessLabel.trim()) {
-                    toast.error("Indica un nombre y un PIN de al menos 8 caracteres.");
-                    return;
-                  }
-                  createAccessCodeMutation.mutate({
-                    label: newAccessLabel.trim(),
-                    pin: newAccessPin,
-                    role: newAccessRole,
-                    guard: newAccessGuard,
-                  });
-                }}
-                className="mb-5 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-4"
-              >
-                <div className="mb-3 text-xs font-bold uppercase tracking-[0.15em] text-amber-200">
-                  Crear usuario con PIN
-                </div>
-                <div className="grid gap-2 md:grid-cols-[1.1fr_1fr_0.9fr_auto]">
-                  <input
-                    value={newAccessLabel}
-                    onChange={event => setNewAccessLabel(event.target.value)}
-                    placeholder="Nombre del usuario"
-                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none focus:border-amber-300/40"
-                  />
-                  <div className="relative">
-                    <input
-                      value={newAccessPin}
-                      onChange={event => setNewAccessPin(event.target.value)}
-                      placeholder="PIN mínimo 8 caracteres"
-                      type={showNewAccessPin ? "text" : "password"}
-                      className="h-10 w-full rounded-lg border border-white/[0.08] bg-[#151e20] px-3 pr-10 text-sm text-white outline-none focus:border-amber-300/40"
-                    />
-                    <button
-                      type="button"
-                      aria-label={showNewAccessPin ? "Ocultar PIN" : "Mostrar PIN"}
-                      title={showNewAccessPin ? "Ocultar PIN" : "Mostrar PIN"}
-                      onClick={() => setShowNewAccessPin(current => !current)}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:bg-white/5 hover:text-amber-200"
-                    >
-                      {showNewAccessPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                  <select
-                    value={newAccessRole}
-                    onChange={event => setNewAccessRole(event.target.value as "facilitator" | "supervisor")}
-                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none"
-                  >
-                    <option value="facilitator">Facilitador</option>
-                    <option value="supervisor">Supervisor</option>
-                  </select>
-                  <select
-                    value={newAccessGuard}
-                    onChange={event => setNewAccessGuard(event.target.value as Guard)}
-                    className="h-10 rounded-lg border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none"
-                  >
-                    {GUARDS.map(item => <option key={item} value={item}>Guardia {GUARD_LABEL[item]}</option>)}
-                  </select>
-                  <button
-                    type="submit"
-                    disabled={createAccessCodeMutation.isPending}
-                    className="h-10 rounded-lg bg-amber-300 px-4 text-xs font-bold text-[#0a0f10] disabled:opacity-40"
-                  >
-                    Crear acceso
-                  </button>
-                </div>
-                <p className="mt-2 text-xs text-slate-500">
-                  El PIN se guarda como hash; entrégaselo directamente al usuario y no se vuelve a mostrar en la lista.
-                </p>
-              </form>
-              <div className="mb-5 overflow-x-auto rounded-xl border border-white/[0.07]">
-                <table className="w-full min-w-[620px] text-left text-sm">
-                  <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-500">
-                    <tr><th className="px-4 py-3">Usuario PIN</th><th className="px-4 py-3">Rol / guardia</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Último acceso</th><th className="px-4 py-3" /></tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.05]">
-                    {accessCodes.data?.map(code => (
-                      <tr key={code.id}>
-                        <td className="px-4 py-3 font-medium text-white">{code.label}</td>
-                        <td className="px-4 py-3 text-slate-300">
-                          <div>{code.role === "facilitator" ? "Facilitador" : "Supervisor"}</div>
-                          <select
-                            value={code.guard}
-                            onChange={event => updateAccessCodeGuardMutation.mutate({ id: code.id, guard: event.target.value as Guard })}
-                            disabled={updateAccessCodeGuardMutation.isPending}
-                            className="mt-1 h-7 rounded-md border border-white/[0.08] bg-[#151e20] px-2 text-[11px] text-amber-200 outline-none"
-                          >
-                            {GUARDS.map(item => <option key={item} value={item}>Guardia {GUARD_LABEL[item]}</option>)}
-                          </select>
-                        </td>
-                        <td className="px-4 py-3 text-xs">{code.active ? <span className="text-emerald-300">Activo</span> : <span className="text-slate-600">Desactivado</span>}</td>
-                        <td className="px-4 py-3 text-xs text-slate-500">{formatDate(code.lastUsedAt)}</td>
-                        <td className="px-4 py-3 text-right">{code.active && <button onClick={() => revokeAccessCodeMutation.mutate({ id: code.id })} className="rounded-lg border border-rose-400/20 px-2.5 py-1.5 text-[11px] font-semibold text-rose-300 hover:bg-rose-400/10">Desactivar</button>}</td>
-                      </tr>
-                    ))}
-                    {!accessCodes.data?.length && <tr><td colSpan={5} className="px-4 py-6 text-center text-xs text-slate-500">Aún no hay usuarios con PIN creados.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-              <div className="overflow-x-auto rounded-xl border border-white/[0.07]">
-                <table className="w-full min-w-[620px] text-left text-sm">
-                  <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Usuario</th>
-                      <th className="px-4 py-3">Correo</th>
-                      <th className="px-4 py-3">Rol</th>
-                      <th className="px-4 py-3">Último acceso</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.05]">
-                    {accessUsers.isLoading ? (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500"><RefreshCw className="mx-auto h-4 w-4 animate-spin text-amber-300" /></td></tr>
-                    ) : accessUsers.data?.length ? (
-                      accessUsers.data.map(person => (
-                        <tr key={person.id}>
-                          <td className="px-4 py-3 font-medium text-white">{person.name || "Sin nombre"}</td>
-                          <td className="px-4 py-3 text-slate-400">{person.email || "—"}</td>
-                          <td className="px-4 py-3">
-                            <select
-                              value={person.role === "user" ? "supervisor" : person.role}
-                              onChange={event => userRoleMutation.mutate({
-                                userId: person.id,
-                                role: event.target.value as "admin" | "facilitator" | "supervisor" | "viewer",
-                              })}
-                              disabled={userRoleMutation.isPending}
-                              className="h-9 rounded-lg border border-white/[0.08] bg-[#151e20] px-2 text-xs text-white outline-none disabled:opacity-50"
-                            >
-                              <option value="admin">Administrador</option>
-                              <option value="facilitator">Facilitador</option>
-                              <option value="supervisor">Supervisor</option>
-                              <option value="viewer">Visualizador</option>
-                            </select>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-slate-500">{formatDate(person.lastSignedIn)}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Aún no hay usuarios registrados.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <p className="mt-3 text-xs leading-5 text-slate-500">
-                Administrador: acceso total. Facilitador: importación, recepción y relevo. Supervisor: visualización operativa. Visualizador: solo consulta y KPIs.
-              </p>
             </div>
           </div>
         </div>
