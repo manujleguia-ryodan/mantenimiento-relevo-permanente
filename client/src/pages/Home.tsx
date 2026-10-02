@@ -569,6 +569,18 @@ export default function Home() {
     return Array.from(groups.values());
   }, [filteredRows]);
 
+  const workshopGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; equipment: (typeof rows)[number]["equipment"]; rows: typeof rows }>();
+    for (const row of rows) {
+      if (!row.equipment?.activo_en_taller) continue;
+      const key = String(row.equipment.id);
+      const existing = groups.get(key);
+      if (existing) existing.rows.push(row);
+      else groups.set(key, { key, equipment: row.equipment, rows: [row] });
+    }
+    return Array.from(groups.values());
+  }, [rows]);
+
   const otTypeCounts = useMemo(() => rows.reduce(
     (counts, row) => {
       const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
@@ -1167,104 +1179,95 @@ export default function Home() {
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
-                        <Truck className="h-3.5 w-3.5" /> Asignación semanal
+                        <Truck className="h-3.5 w-3.5" /> Área de trabajo
                       </div>
-                      <h2 className="mt-1 font-display text-2xl text-white">
-                        Equipos de mi guardia
-                      </h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Selecciona los equipos que deben aparecer en el panel de
-                        la Guardia {GUARD_LABEL[guard]}.
-                      </p>
+                      <h2 className="mt-1 font-display text-2xl text-white">Equipos de mi guardia</h2>
+                      <p className="mt-1 text-sm text-slate-500">Gestiona aquí únicamente los equipos ingresados al taller y sus OTs.</p>
                     </div>
                     <div className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs text-amber-200">
-                      {selectedEquipmentIds.length} seleccionados
+                      {workshopGroups.length} equipo{workshopGroups.length === 1 ? "" : "s"} activo{workshopGroups.length === 1 ? "" : "s"}
                     </div>
                   </div>
-                  <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-                    <div className="col-span-full flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 sm:flex-row sm:items-center">
-                      <div className="flex flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-[#0d1314] px-3 py-2">
-                        <Search className="h-4 w-4 text-slate-500" />
-                        <input
-                          value={equipmentSearch}
-                          onChange={event => setEquipmentSearch(event.target.value)}
-                          placeholder="Buscar equipo por código o descripción..."
-                          className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-600"
-                        />
-                      </div>
-                      {isFacilitator && (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setFilteredEquipmentSelected(true)}
-                            disabled={!filteredEquipment.length || assignmentMutation.isPending}
-                            className="rounded-lg border border-emerald-400/20 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-400/10 disabled:opacity-40"
-                          >
-                            Seleccionar visibles
-                          </button>
-                          <button
-                            onClick={() => setFilteredEquipmentSelected(false)}
-                            disabled={!filteredEquipment.length || assignmentMutation.isPending}
-                            className="rounded-lg border border-rose-400/20 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-400/10 disabled:opacity-40"
-                          >
-                            Deseleccionar visibles
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    {filteredEquipment.map(item => (
-                      <div
-                        key={item.id}
-                        onClick={() => toggleEquipment(item.id)}
-                        onKeyDown={event => {
-                          if (event.key === "Enter" || event.key === " ") toggleEquipment(item.id);
-                        }}
-                        role="button"
-                        tabIndex={isFacilitator ? 0 : -1}
-                        aria-disabled={!isFacilitator}
-                        className={`flex items-center justify-between rounded-xl border px-3 py-3 text-left transition disabled:cursor-default disabled:opacity-70 ${selectedEquipmentIds.includes(item.id) ? "border-amber-300/40 bg-amber-300/10 text-amber-100" : "border-white/[0.07] bg-white/[0.025] text-slate-400 hover:border-white/15 hover:text-white"}`}
-                      >
-                        <span>
-                          <span className="block font-mono text-sm font-semibold">
-                            {item.code}
-                          </span>
-                          <span className="mt-1 block truncate text-[10px] text-slate-500">
-                            {item.description || "Equipo operativo"}
-                          </span>
-                        </span>
-                        <div className="flex items-center gap-2">
-                          {selectedEquipmentIds.includes(item.id) && (
-                            <span className="grid h-5 w-5 place-items-center rounded-full bg-amber-300 text-[#0a0f10]">
-                              <Check className="h-3 w-3" />
-                            </span>
-                          )}
-                          {isFacilitator && (
+                  <div className="mt-5 space-y-4">
+                    {workshopGroups
+                      .filter(group => {
+                        const query = equipmentSearch.trim().toLowerCase();
+                        return !query || `${group.equipment?.code ?? ""} ${group.equipment?.description ?? ""}`.toLowerCase().includes(query);
+                      })
+                      .map(group => (
+                        <article key={group.key} className="overflow-hidden rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.035]">
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-300/10 text-emerald-300"><Truck className="h-5 w-5" /></div>
+                              <div>
+                                <div className="font-mono text-base font-bold text-emerald-100">{group.equipment?.code}</div>
+                                <div className="text-[11px] text-slate-500">{group.equipment?.description || "Equipo operativo"} · {group.rows.length} OT</div>
+                              </div>
+                            </div>
                             <button
                               type="button"
-                              onClick={event => {
-                                event.stopPropagation();
-                                equipmentWorkshopMutation.mutate({ equipmentId: item.id, active: false });
-                              }}
+                              onClick={() => equipmentWorkshopMutation.mutate({ equipmentId: group.equipment!.id, active: false })}
                               disabled={equipmentWorkshopMutation.isPending}
-                              className="rounded-md border border-rose-300/25 px-2 py-1 text-[10px] font-semibold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
+                              className="rounded-lg border border-rose-300/25 px-3 py-2 text-[11px] font-bold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
                             >
                               Liberar Equipo
                             </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {!filteredEquipment.length && allEquipment.length > 0 && (
-                      <div className="col-span-full rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-500">
-                        {equipmentSearch.trim()
-                          ? "No hay equipos activos que coincidan con la búsqueda."
-                          : "No hay equipos activos en taller. Esta vista se habilitará cuando activo_en_taller sea true."}
-                      </div>
-                    )}
-                    {!allEquipment.length && (
-                      <div className="col-span-full rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-500">
-                        Importa una semana para cargar equipos.
-                      </div>
-                    )}
+                          </div>
+                          <div className="divide-y divide-white/[0.06]">
+                            {group.rows.map(row => {
+                              const state = (row.state?.status ?? "SIN_REVISAR") as Status;
+                              const fields = getImportedFields(row.workOrder.sourceData);
+                              const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
+                              const requiresLogistics = row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
+                              const description = row.workOrder.description || fields["Descripción de operación"] || fields.Descripcion || "Sin descripción";
+                              return (
+                                <div key={row.workOrder.id} className="p-4">
+                                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
+                                        <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
+                                        {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
+                                        {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Cerrada</span>}
+                                      </div>
+                                      <p className="mt-2 text-sm leading-relaxed text-slate-300">{description}</p>
+                                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                                        <span>Reserva: <b className="text-slate-300">{getReservationValue(row.workOrder.sourceData) || "—"}</b></span>
+                                        <span>Responsable: <b className="text-slate-300">{row.state?.responsibleName || "Sin registrar"}</b></span>
+                                        {row.execution?.status === "CERRADA_NOTIFICADA" && <span>Cierre: <b className="text-blue-200">{row.execution.executedByName || "Operador"} · {formatDate(row.execution.executedAt)}</b></span>}
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                                      {requiresLogistics && (
+                                        !canReviewReception(row.state?.status as Status | undefined) ? (
+                                          <span className="rounded-xl border border-emerald-300/20 bg-emerald-300/[0.08] px-3 py-2 text-xs font-bold text-emerald-200">Revisada</span>
+                                        ) : (
+                                          <button type="button" onClick={() => openEdit(row)} className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-300/20">Revisar recepción</button>
+                                        )
+                                      )}
+                                      {selectedWeekId && (
+                                        <button
+                                          type="button"
+                                          onClick={() => executionMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, guard, closed: row.execution?.status !== "CERRADA_NOTIFICADA" })}
+                                          disabled={executionMutation.isPending}
+                                          className={`rounded-lg border px-3 py-2 text-[11px] font-bold transition disabled:opacity-40 ${row.execution?.status === "CERRADA_NOTIFICADA" ? "border-blue-300/25 text-blue-200 hover:bg-blue-300/10" : "border-emerald-300/25 text-emerald-200 hover:bg-emerald-300/10"}`}
+                                        >{row.execution?.status === "CERRADA_NOTIFICADA" ? "Reabrir OT" : "Cerrar OT"}</button>
+                                      )}
+                                      {isCorrective && (
+                                        <>
+                                          <button type="button" onClick={() => openCorrectiveEditor(row)} className="rounded-lg border border-sky-300/20 px-3 py-2 text-[11px] font-bold text-sky-200 transition hover:bg-sky-300/10">Editar</button>
+                                          <button type="button" onClick={() => { if (window.confirm("¿Anular esta OT correctiva? Se conservará en el historial.")) cancelCorrectiveOtMutation.mutate({ workOrderId: row.workOrder.id }); }} disabled={cancelCorrectiveOtMutation.isPending} className="rounded-lg border border-rose-300/20 px-3 py-2 text-[11px] font-bold text-rose-200 transition hover:bg-rose-300/10 disabled:opacity-40">Anular</button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </article>
+                      ))}
+                    {!workshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-sm text-slate-500">No hay equipos activos en el taller. Ingresa un equipo desde “OT y recepción”.</div>}
                   </div>
                 </section>}
 
@@ -1275,14 +1278,14 @@ export default function Home() {
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                     <div>
                       <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
-                        <ClipboardCheck className="h-3.5 w-3.5" /> Control
-                        operativo
+                        <ClipboardCheck className="h-3.5 w-3.5" /> Estacionamiento
+                        de OTs
                       </div>
                       <h2 className="mt-1 font-display text-2xl text-white">
                         {otTypeFilter === "CORRECTIVAS" ? "OT correctivas" : otTypeFilter === "PROGRAMADAS" ? "OT programadas" : "Todas las OT"} · Guardia {GUARD_LABEL[guard]}
                       </h2>
                       <p className="mt-1 text-xs text-slate-500">
-                        Consulta cada tipo de OT por separado, con su equipo, reserva y descripción de operación.
+                        Vista informativa. Las OTs son de solo lectura hasta ingresar su equipo a guardia.
                       </p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row">
@@ -1313,46 +1316,6 @@ export default function Home() {
                           className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40 sm:w-64"
                         />
                       </div>
-                      <select
-                        value={statusFilter}
-                        onChange={event =>
-                          setStatusFilter(
-                            event.target.value as Status | "TODOS"
-                          )
-                        }
-                        className="h-10 rounded-xl border border-white/[0.08] bg-[#151e20] px-3 text-xs text-slate-300 outline-none"
-                      >
-                        <option value="TODOS">Todos los estados</option>
-                        <option value="SIN_REVISAR">Sin revisar</option>
-                        <option value="RECIBIDA">Recibida</option>
-                        <option value="PARCIAL">Parcial</option>
-                        <option value="FALTA_RECIBIR">Falta recibir</option>
-                      </select>
-                      <select
-                        value={warehouseFilter}
-                        onChange={event =>
-                          setWarehouseFilter(event.target.value)
-                        }
-                        className="h-10 rounded-xl border border-white/[0.08] bg-[#151e20] px-3 text-xs text-slate-300 outline-none"
-                      >
-                        <option value="TODOS">Todos los almacenes</option>
-                        <option value="CENTRAL">Central</option>
-                        <option value="FERREYROS">Ferreyros</option>
-                        <option value="DONALDSON">Donaldson</option>
-                        <option value="NINGUNO">Sin pendiente</option>
-                      </select>
-                      {canCloseOt && (
-                        <select
-                          value={executionFilter}
-                          onChange={event => setExecutionFilter(event.target.value as typeof executionFilter)}
-                          className="h-10 rounded-xl border border-blue-300/15 bg-[#151e20] px-3 text-xs text-slate-300 outline-none"
-                          aria-label="Filtrar ejecución de OT"
-                        >
-                          <option value="TODAS">Todas las OT</option>
-                          <option value="PENDIENTES">Pendientes de cierre</option>
-                          <option value="CERRADAS">OT cerradas</option>
-                        </select>
-                      )}
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -1370,9 +1333,6 @@ export default function Home() {
                           </th>
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
                             Equipo
-                          </th>
-                          <th className="whitespace-nowrap px-3 py-3 font-bold">
-                            Acción
                           </th>
                           {excelColumns.map(column => (
                             <th
@@ -1395,14 +1355,13 @@ export default function Home() {
                           <th className="whitespace-nowrap px-4 py-3 font-bold">
                             Actualizado
                           </th>
-                          <th className="px-4 py-3" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/[0.05]">
                         {groupedRows.map(group => (
                           <Fragment key={group.key}>
                             <tr className="border-y border-amber-300/10 bg-amber-300/[0.045]">
-                              <td colSpan={7 + excelColumns.length} className="px-4 py-3">
+                              <td colSpan={6 + excelColumns.length} className="px-4 py-3">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                   <div className="flex items-center gap-3">
                                     <Truck className="h-4 w-4 text-amber-300" />
@@ -1450,22 +1409,6 @@ export default function Home() {
                               </td>
                               <td className="whitespace-nowrap px-4 py-2.5 text-sm text-amber-200/85">
                                 <span>{row.equipment?.code ?? "—"}</span>
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-2.5">
-                                {isFacilitator && requiresLogistics && (
-                                  !canReviewReception(row.state?.status as Status | undefined) ? (
-                                    <span className="inline-flex items-center rounded-xl border border-emerald-300/20 bg-emerald-300/[0.08] px-3.5 py-2 text-xs font-bold text-emerald-200">
-                                      Revisada
-                                    </span>
-                                  ) : (
-                                    <button
-                                      onClick={() => openEdit(row)}
-                                      className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 shadow-sm transition hover:bg-amber-300/20 hover:text-amber-100"
-                                    >
-                                      Revisar
-                                    </button>
-                                  )
-                                )}
                               </td>
                               {excelColumns.map(column => {
                                 const normalizedColumn = normalizeExcelHeader(column);
@@ -1518,46 +1461,6 @@ export default function Home() {
                               <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-500">
                                 {formatDate(row.state?.updatedAt)}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                                {canCloseOt && selectedWeekId && (
-                                  <button
-                                    onClick={() =>
-                                      executionMutation.mutate({
-                                        workOrderId: row.workOrder.id,
-                                        weekId: selectedWeekId,
-                                        guard,
-                                        closed: row.execution?.status !== "CERRADA_NOTIFICADA",
-                                      })
-                                    }
-                                    disabled={executionMutation.isPending}
-                                    className={`mr-2 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition disabled:opacity-40 ${row.execution?.status === "CERRADA_NOTIFICADA" ? "border-emerald-400/25 text-emerald-300 hover:bg-emerald-400/10" : "border-white/[0.08] text-slate-400 hover:border-emerald-300/30 hover:text-emerald-200"}`}
-                                  >
-                                    {row.execution?.status === "CERRADA_NOTIFICADA"
-                                      ? "Reabrir OT"
-                                      : "Cerrar y notificar"}
-                                  </button>
-                                )}
-                                {isFacilitator && isCorrective && (
-                                  <>
-                                    <button
-                                      onClick={() => openCorrectiveEditor(row)}
-                                      className="ml-2 rounded-lg border border-sky-300/20 px-2.5 py-1.5 text-[11px] font-semibold text-sky-200 transition hover:bg-sky-300/10"
-                                    >
-                                      Editar
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        if (window.confirm("¿Anular esta OT correctiva? Se conservará en el historial, pero dejará de aparecer en el panel activo."))
-                                          cancelCorrectiveOtMutation.mutate({ workOrderId: row.workOrder.id });
-                                      }}
-                                      disabled={cancelCorrectiveOtMutation.isPending}
-                                      className="ml-2 rounded-lg border border-rose-300/20 px-2.5 py-1.5 text-[11px] font-semibold text-rose-200 transition hover:bg-rose-300/10 disabled:opacity-40"
-                                    >
-                                      Anular
-                                    </button>
-                                  </>
-                                )}
-                              </td>
                             </tr>
                           );
                             })}
@@ -1584,7 +1487,7 @@ export default function Home() {
                       visibles
                     </span>
                     <span>
-                      Click en “Revisar” para registrar recepción e historial
+                      Consulta las OTs aquí; ingrésalas a guardia para trabajar sus estados
                     </span>
                   </div>
                 </section>}
