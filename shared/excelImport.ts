@@ -4,6 +4,13 @@ export type ExcelImportRow = {
   equipmentDescription?: string;
   description?: string;
   extra?: Record<string, string>;
+  rowNumber?: number;
+};
+
+export type ExcelImportInvalidRow = {
+  rowNumber: number;
+  otNumber: string;
+  reason: string;
 };
 
 export function normalizeExcelHeader(value: string) {
@@ -35,7 +42,7 @@ function normalizeEquipmentCode(value: unknown, sourceKey: string) {
   const code = String(value ?? "").trim().toUpperCase();
   const source = normalizeExcelHeader(sourceKey);
   if (source === "descripciondeubicaciontecnica" || source === "ubicaciontecnica") {
-    if (code === "0") return "SIN_EQUIPO";
+    if (code === "0") return "";
     return code.replace(/^EQ_O/, "");
   }
   return code;
@@ -82,11 +89,15 @@ export function rowsFromExcelMatrix(matrix: unknown[][]) {
     return label;
   });
 
-  return matrix.slice(headerIndex + 1).flatMap(values => {
+  return matrix.slice(headerIndex + 1).flatMap((values, offset) => {
     if (!values.some(value => String(value ?? "").trim())) return [];
     const record: Record<string, unknown> = {};
     headers.forEach((header, index) => {
       if (header) record[header] = values[index] ?? "";
+    });
+    Object.defineProperty(record, "__excelRowNumber", {
+      value: headerIndex + offset + 2,
+      enumerable: false,
     });
     return [record];
   });
@@ -157,7 +168,7 @@ export function mapExcelRows(rawRows: Record<string, unknown>[]) {
     );
   }
 
-  const mapped = rawRows.map(raw => {
+  const mapped = rawRows.map((raw, index) => {
     const extra: Record<string, string> = {};
     for (const key of keys) extra[key] = String(raw[key] ?? "").trim();
     return {
@@ -170,13 +181,18 @@ export function mapExcelRows(rawRows: Record<string, unknown>[]) {
         ? String(raw[descriptionKey] ?? "").trim()
         : "",
       extra,
+      rowNumber: Number((raw as { __excelRowNumber?: number }).__excelRowNumber) || index + 2,
     } satisfies ExcelImportRow;
   });
 
   const candidates = mapped.filter(row => row.otNumber || row.equipmentCode);
-  const invalid = candidates.filter(
-    row => !row.otNumber || !row.equipmentCode
-  ).length;
+  const invalidRows = candidates.flatMap(row => {
+    if (!row.otNumber && !row.equipmentCode) return [{ rowNumber: row.rowNumber, otNumber: "", reason: "Falta Número de OT y código de Equipo." }];
+    if (!row.otNumber) return [{ rowNumber: row.rowNumber, otNumber: "", reason: "Falta Número de OT." }];
+    if (!row.equipmentCode) return [{ rowNumber: row.rowNumber, otNumber: row.otNumber, reason: "Falta código de Equipo." }];
+    return [];
+  });
+  const invalid = invalidRows.length;
   const valid = mapped.filter(row => row.otNumber && row.equipmentCode);
   const seen = new Set<string>();
   let duplicates = 0;
@@ -208,8 +224,9 @@ export function mapExcelRows(rawRows: Record<string, unknown>[]) {
     : valid;
 
   return {
-    rows,
+    rows: rows.map(({ rowNumber: _rowNumber, ...row }) => row),
     invalid,
+    invalidRows,
     duplicates,
     detectedColumns: {
       ot: otKey,

@@ -106,6 +106,24 @@ function correctiveSource(sourceData: string | null) {
   }
 }
 
+function parseSourceData(sourceData: string | null): Record<string, string> {
+  if (!sourceData) return {};
+  try {
+    const parsed = JSON.parse(sourceData) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? Object.fromEntries(Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, String(value ?? "")]))
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function moveWorkOrderToWeek(db: Awaited<ReturnType<typeof requireDb>>, workOrderId: number, fromWeekId: number, toWeekId: number) {
+  if (fromWeekId === toWeekId) return;
+  await db.update(otStates).set({ weekId: toWeekId }).where(and(eq(otStates.workOrderId, workOrderId), eq(otStates.weekId, fromWeekId)));
+  await db.update(otExecutions).set({ weekId: toWeekId }).where(and(eq(otExecutions.workOrderId, workOrderId), eq(otExecutions.weekId, fromWeekId)));
+}
+
 export function buildGuardAssignmentRows(
   weekId: number,
   guard: "A" | "B" | "C" | "D",
@@ -285,8 +303,8 @@ export const appRouter = router({
           importedById: ctx.user?.id ?? null,
         }));
         const equipmentCache = new Map<string, number>();
-        const importedEquipmentIds: number[] = [];
-        const seenOt = new Set<string>();
+        const assignmentEquipmentIds: number[] = [];
+        let updatedCount = 0;
         let duplicateCount = 0;
         let equipmentCount = 0;
         let otCount = 0;
@@ -334,43 +352,36 @@ export const appRouter = router({
         for (const row of input.rows) {
           const otNumber = row.otNumber.trim();
           const equipmentCode = row.equipmentCode.trim().toUpperCase();
-          if (seenOt.has(otNumber)) {
-            duplicateCount += 1;
-            continue;
-          }
-          seenOt.add(otNumber);
-
-          const [existingWorkOrder] = await db
-            .select({ id: workOrders.id })
-            .from(workOrders)
-            .where(and(eq(workOrders.weekId, weekId), eq(workOrders.otNumber, otNumber)))
-            .limit(1);
-          if (existingWorkOrder) {
-            duplicateCount += 1;
-            continue;
-          }
-
           let equipmentId = equipmentCache.get(equipmentCode);
           if (!equipmentId) {
-            const [existingEquipment] = await db
-              .select()
-              .from(equipment)
-              .where(eq(equipment.code, equipmentCode))
-              .limit(1);
+            const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, equipmentCode)).limit(1);
             if (existingEquipment) {
               equipmentId = existingEquipment.id;
+              if (row.equipmentDescription?.trim()) {
+                await db.update(equipment).set({ description: row.equipmentDescription.trim() }).where(eq(equipment.id, equipmentId));
+              }
             } else {
-              const equipmentInsert = await db.insert(equipment).values({
-                code: equipmentCode,
-                description: row.equipmentDescription || null,
-                activo_en_taller: false,
-              });
-              equipmentId = insertId(equipmentInsert);
+              equipmentId = insertId(await db.insert(equipment).values({ code: equipmentCode, description: row.equipmentDescription || null, activo_en_taller: false }));
               equipmentCount += 1;
             }
             equipmentCache.set(equipmentCode, equipmentId);
           }
-          importedEquipmentIds.push(equipmentId);
+
+          const [existingWorkOrder] = await db.select().from(workOrders).where(eq(workOrders.otNumber, otNumber)).limit(1);
+          if (existingWorkOrder) {
+            const previousData = parseSourceData(existingWorkOrder.sourceData);
+            const technicalData = { ...previousData, ...(row.extra ?? {}), Responsable: ctx.user?.name ?? "Operador logístico" };
+            await moveWorkOrderToWeek(db, existingWorkOrder.id, existingWorkOrder.weekId, weekId);
+            await db.update(workOrders).set({
+              weekId,
+              equipmentId,
+              description: row.description || existingWorkOrder.description,
+              sourceData: JSON.stringify(technicalData),
+            }).where(eq(workOrders.id, existingWorkOrder.id));
+            updatedCount += 1;
+            duplicateCount += 1;
+            continue;
+          }
 
           await db.insert(workOrders).values({
             weekId,
@@ -379,10 +390,11 @@ export const appRouter = router({
             description: row.description || null,
             sourceData: JSON.stringify({ ...(row.extra ?? {}), Responsable: ctx.user?.name ?? "Operador logístico" }),
           });
+          assignmentEquipmentIds.push(equipmentId);
           otCount += 1;
         }
 
-        for (const assignment of buildGuardAssignmentRows(weekId, input.guard, importedEquipmentIds, ctx.user?.id ?? null)) {
+        for (const assignment of buildGuardAssignmentRows(weekId, input.guard, assignmentEquipmentIds, ctx.user?.id ?? null)) {
           const [existingAssignment] = await db
             .select({ id: guardAssignments.id })
             .from(guardAssignments)
@@ -395,7 +407,7 @@ export const appRouter = router({
           if (!existingAssignment) await db.insert(guardAssignments).values(assignment);
         }
 
-        return { weekId, otCount, equipmentCount, duplicateCount, purgedCount };
+        return { weekId, otCount, updatedCount, equipmentCount, duplicateCount, purgedCount };
       }),
 
     createCorrectiveOt: facilitatorProcedure
@@ -409,12 +421,7 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
-        const equipmentCode = input.equipmentCode.toUpperCase();
-        const [duplicate] = await db.select({ id: workOrders.id })
-          .from(workOrders)
-          .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.otNumber, input.otNumber)))
-          .limit(1);
-        if (duplicate) throw new TRPCError({ code: "CONFLICT", message: "Ya existe una OT con ese número en esta semana." });
+        const equipmentCode = input.equipmentCode.trim().toUpperCase();
         const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, equipmentCode)).limit(1);
         let equipmentId: number;
         if (existingEquipment) {
@@ -429,13 +436,32 @@ export const appRouter = router({
           Tipo: "Correctiva",
           Responsable: ctx.user?.name ?? "Operador logístico",
         });
-        const inserted = await db.insert(workOrders).values({
-          weekId: input.weekId,
-          otNumber: input.otNumber,
-          equipmentId,
-          description: input.description,
-          sourceData,
-        });
+        const [existingWorkOrder] = await db.select().from(workOrders).where(eq(workOrders.otNumber, input.otNumber)).limit(1);
+        let workOrderId: number;
+        let updated = false;
+        if (existingWorkOrder) {
+          await moveWorkOrderToWeek(db, existingWorkOrder.id, existingWorkOrder.weekId, input.weekId);
+          await db.update(workOrders).set({
+            weekId: input.weekId,
+            equipmentId,
+            description: input.description,
+            sourceData,
+            isCancelled: false,
+            cancelledAt: null,
+            cancelledById: null,
+            cancellationReason: null,
+          }).where(eq(workOrders.id, existingWorkOrder.id));
+          workOrderId = existingWorkOrder.id;
+          updated = true;
+        } else {
+          workOrderId = insertId(await db.insert(workOrders).values({
+            weekId: input.weekId,
+            otNumber: input.otNumber,
+            equipmentId,
+            description: input.description,
+            sourceData,
+          }));
+        }
         const [assignment] = await db.select({ id: guardAssignments.id })
           .from(guardAssignments)
           .where(and(
@@ -452,7 +478,7 @@ export const appRouter = router({
             selectedById: ctx.user?.id ?? null,
           });
         }
-        return { success: true, workOrderId: insertId(inserted), equipmentId };
+        return { success: true, updated, workOrderId, equipmentId } as const;
       }),
 
     updateCorrectiveOt: facilitatorProcedure
@@ -467,13 +493,38 @@ export const appRouter = router({
         const db = await requireDb();
         const [current] = await db.select().from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1);
         if (!current || current.isCancelled || !correctiveSource(current.sourceData)) throw new TRPCError({ code: "NOT_FOUND", message: "Solo se pueden editar OT correctivas manuales activas." });
-        const [duplicate] = await db.select({ id: workOrders.id }).from(workOrders).where(and(eq(workOrders.weekId, current.weekId), eq(workOrders.otNumber, input.otNumber))).limit(1);
-        if (duplicate && duplicate.id !== input.workOrderId) throw new TRPCError({ code: "CONFLICT", message: "Ya existe otra OT con ese número en esta semana." });
-        const code = input.equipmentCode.toUpperCase();
+        const [duplicate] = await db.select().from(workOrders).where(eq(workOrders.otNumber, input.otNumber)).limit(1);
+        let targetId = current.id;
+        if (duplicate && duplicate.id !== current.id) {
+          const sourceStates = await db.select().from(otStates).where(eq(otStates.workOrderId, current.id));
+          const targetStates = await db.select().from(otStates).where(eq(otStates.workOrderId, duplicate.id));
+          for (const sourceState of sourceStates) {
+            const matchingTarget = targetStates.find(state => state.weekId === sourceState.weekId && state.guard === sourceState.guard);
+            if (matchingTarget) {
+              await db.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, sourceState.id));
+              await db.delete(otHistory).where(eq(otHistory.otStateId, sourceState.id));
+              await db.delete(otStates).where(eq(otStates.id, sourceState.id));
+            } else {
+              await db.update(otStates).set({ workOrderId: duplicate.id }).where(eq(otStates.id, sourceState.id));
+            }
+          }
+          const sourceExecutions = await db.select().from(otExecutions).where(eq(otExecutions.workOrderId, current.id));
+          const targetExecutions = await db.select().from(otExecutions).where(eq(otExecutions.workOrderId, duplicate.id));
+          for (const sourceExecution of sourceExecutions) {
+            const matchingTarget = targetExecutions.find(execution => execution.weekId === sourceExecution.weekId && execution.guard === sourceExecution.guard);
+            if (matchingTarget) await db.delete(otExecutions).where(eq(otExecutions.id, sourceExecution.id));
+            else await db.update(otExecutions).set({ workOrderId: duplicate.id }).where(eq(otExecutions.id, sourceExecution.id));
+          }
+          await db.update(otHistory).set({ workOrderId: duplicate.id }).where(eq(otHistory.workOrderId, current.id));
+          await db.delete(workOrders).where(eq(workOrders.id, current.id));
+          targetId = duplicate.id;
+        }
+        const code = input.equipmentCode.trim().toUpperCase();
         const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, code)).limit(1);
-        const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code }));
-        await db.update(workOrders).set({ otNumber: input.otNumber, equipmentId, description: input.description, sourceData: JSON.stringify({ Reserva: input.reservation ?? "", "Descripción de operación": input.description, Tipo: "Correctiva", Responsable: ctx.user?.name ?? "Operador logístico" }) }).where(eq(workOrders.id, input.workOrderId));
-        return { success: true };
+        const equipmentId = existingEquipment?.id ?? insertId(await db.insert(equipment).values({ code, activo_en_taller: true }));
+        if (existingEquipment) await db.update(equipment).set({ activo_en_taller: true }).where(eq(equipment.id, equipmentId));
+        await db.update(workOrders).set({ otNumber: input.otNumber, equipmentId, description: input.description, sourceData: JSON.stringify({ Reserva: input.reservation ?? "", "Descripción de operación": input.description, Tipo: "Correctiva", Responsable: ctx.user?.name ?? "Operador logístico" }) }).where(eq(workOrders.id, targetId));
+        return { success: true, workOrderId: targetId } as const;
       }),
 
     createCorrectiveOts: facilitatorProcedure
@@ -491,12 +542,10 @@ export const appRouter = router({
         const db = await requireDb();
         const equipmentCache = new Map<string, number>();
         let created = 0;
+        let updated = 0;
         let duplicates = 0;
         for (const row of input.rows) {
-          const [duplicate] = await db.select({ id: workOrders.id }).from(workOrders)
-            .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.otNumber, row.otNumber))).limit(1);
-          if (duplicate) { duplicates += 1; continue; }
-          const code = row.equipmentCode.toUpperCase();
+          const code = row.equipmentCode.trim().toUpperCase();
           let equipmentId = equipmentCache.get(code);
           if (!equipmentId) {
             const [existingEquipment] = await db.select().from(equipment).where(eq(equipment.code, code)).limit(1);
@@ -508,18 +557,21 @@ export const appRouter = router({
             }
             equipmentCache.set(code, equipmentId);
           }
-          await db.insert(workOrders).values({
-            weekId: input.weekId,
-            otNumber: row.otNumber,
-            equipmentId,
-            description: row.description,
-            sourceData: JSON.stringify({ Reserva: row.reservation ?? "", "Descripción de operación": row.description, Tipo: "Correctiva", Responsable: ctx.user?.name ?? "Operador logístico" }),
-          });
+          const sourceData = JSON.stringify({ Reserva: row.reservation ?? "", "Descripción de operación": row.description, Tipo: "Correctiva", Responsable: ctx.user?.name ?? "Operador logístico" });
+          const [existingWorkOrder] = await db.select().from(workOrders).where(eq(workOrders.otNumber, row.otNumber)).limit(1);
+          if (existingWorkOrder) {
+            await moveWorkOrderToWeek(db, existingWorkOrder.id, existingWorkOrder.weekId, input.weekId);
+            await db.update(workOrders).set({ weekId: input.weekId, equipmentId, description: row.description, sourceData, isCancelled: false, cancelledAt: null, cancelledById: null, cancellationReason: null }).where(eq(workOrders.id, existingWorkOrder.id));
+            updated += 1;
+            duplicates += 1;
+          } else {
+            await db.insert(workOrders).values({ weekId: input.weekId, otNumber: row.otNumber, equipmentId, description: row.description, sourceData });
+            created += 1;
+          }
           const [assignment] = await db.select({ id: guardAssignments.id }).from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.guard), eq(guardAssignments.equipmentId, equipmentId))).limit(1);
           if (!assignment) await db.insert(guardAssignments).values({ weekId: input.weekId, guard: input.guard, equipmentId, selectedById: ctx.user?.id ?? null });
-          created += 1;
         }
-        return { success: true, created, duplicates };
+        return { success: true, created, updated, duplicates } as const;
       }),
 
     cancelCorrectiveOt: facilitatorProcedure

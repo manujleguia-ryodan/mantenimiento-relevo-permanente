@@ -154,7 +154,23 @@ describe("Excel import mapping", () => {
       },
     ]);
 
-    expect(result.rows[0]?.equipmentCode).toBe("SIN_EQUIPO");
+    expect(result.rows).toHaveLength(0);
+    expect(result.invalidRows).toEqual([
+      { rowNumber: 2, otNumber: "3", reason: "Falta código de Equipo." },
+    ]);
+  });
+
+  it("reports the Excel row and reason while continuing with valid rows", () => {
+    const result = mapExcelRows([
+      { OT: "7001", Equipo: "CA01", Descripción: "Válida" },
+      { OT: "7002", Equipo: "", Descripción: "Sin equipo" },
+      { OT: "7003", Equipo: "CR02", Descripción: "Válida" },
+    ]);
+
+    expect(result.rows.map(row => row.otNumber)).toEqual(["7001", "7003"]);
+    expect(result.invalidRows).toEqual([
+      { rowNumber: 3, otNumber: "7002", reason: "Falta código de Equipo." },
+    ]);
   });
 
   it("fails with a clear message when OT or equipment columns are missing", () => {

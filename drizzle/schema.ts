@@ -66,7 +66,7 @@ export const workOrders = mysqlTable("workOrders", {
   cancellationReason: varchar("cancellationReason", { length: 500 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => ({
-  periodOtUnique: uniqueIndex("workOrders_period_ot_unique").on(table.weekId, table.otNumber),
+  otNumberUnique: uniqueIndex("workOrders_ot_number_unique").on(table.otNumber),
   weekIdx: index("workOrders_week_idx").on(table.weekId), equipmentIdx: index("workOrders_equipment_idx").on(table.equipmentId),
 }));
 

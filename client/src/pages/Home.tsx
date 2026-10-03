@@ -3,6 +3,7 @@ import {
   mapExcelRows,
   normalizeExcelHeader,
   rowsFromExcelMatrix,
+  type ExcelImportInvalidRow,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
 import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder } from "@shared/maintenance";
@@ -296,6 +297,7 @@ export default function Home() {
       extra?: Record<string, string>;
     }>;
     invalid: number;
+    invalidRows: ExcelImportInvalidRow[];
     duplicates: number;
     detectedWeek: { weekNumber: number; year: number } | null;
   } | null>(null);
@@ -322,6 +324,10 @@ export default function Home() {
   const dashboard = trpc.maintenance.dashboard.useQuery(
     { weekId: selectedWeekId ?? 0, guard },
     { enabled: Boolean(selectedWeekId && session?.role === "facilitator") }
+  );
+  const equipmentOptions = useMemo(
+    () => [...(bootstrap.data?.equipment ?? [])].sort((a, b) => a.code.localeCompare(b.code)),
+    [bootstrap.data?.equipment]
   );
   const utils = trpc.useUtils();
   const pinLoginMutation = trpc.auth.pinLogin.useMutation({
@@ -366,7 +372,7 @@ export default function Home() {
   const importMutation = trpc.maintenance.importWeek.useMutation({
     onSuccess: result => {
       toast.success(
-        `Importación confirmada: ${result.otCount} OT nuevas y ${result.equipmentCount} equipos nuevos${result.purgedCount ? ` · ${result.purgedCount} reprogramadas purgadas` : ""}.`
+        `Importación confirmada: ${result.otCount} OT nuevas y ${result.updatedCount} OT actualizadas${result.equipmentCount ? ` · ${result.equipmentCount} equipos nuevos` : ""}${result.purgedCount ? ` · ${result.purgedCount} reprogramadas purgadas` : ""}.`
       );
       setShowImport(false);
       setImportPreview(null);
@@ -376,8 +382,8 @@ export default function Home() {
     onError: error => toast.error(error.message),
   });
   const createCorrectiveOtMutation = trpc.maintenance.createCorrectiveOt.useMutation({
-    onSuccess: async () => {
-      toast.success("OT correctiva creada y visible en el panel.");
+    onSuccess: async result => {
+      toast.success(result.updated ? "OT correctiva existente actualizada y visible en el panel." : "OT correctiva creada y visible en el panel.");
       setShowCorrectiveOt(false);
       setOtTypeFilter("CORRECTIVAS");
       setCorrectiveOtNumber("");
@@ -390,7 +396,7 @@ export default function Home() {
   });
   const createCorrectiveOtsMutation = trpc.maintenance.createCorrectiveOts.useMutation({
     onSuccess: async result => {
-      toast.success(`${result.created} OT correctivas creadas${result.duplicates ? ` · ${result.duplicates} repetidas omitidas` : ""}.`);
+      toast.success(`${result.created} OT correctivas creadas${result.updated ? ` · ${result.updated} OT existentes actualizadas` : ""}.`);
       setShowCorrectiveOt(false);
       setBulkCorrectiveMode(false);
       setOtTypeFilter("CORRECTIVAS");
@@ -728,12 +734,15 @@ export default function Home() {
           defval: "",
         });
       const result = mapExcelRows(rawRows);
-      if (!result.rows.length)
-        throw new Error("No se encontraron filas válidas con OT y equipo.");
+      if (!result.rows.length) {
+        const detail = result.invalidRows.map(item => `Fila ${item.rowNumber}: ${item.reason}`).join(" · ");
+        throw new Error(`No se encontraron filas válidas con OT y equipo.${detail ? ` ${detail}` : ""}`);
+      }
       setImportPreview({
         fileName: file.name,
         rows: result.rows,
         invalid: result.invalid,
+        invalidRows: result.invalidRows,
         duplicates: result.duplicates,
         detectedWeek,
       });
@@ -1780,7 +1789,7 @@ export default function Home() {
               {!bulkCorrectiveMode ? <>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="text-xs text-slate-400">OT<input required value={correctiveOtNumber} onChange={event => setCorrectiveOtNumber(event.target.value)} placeholder="Ej. 69001234" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
-                  <label className="text-xs text-slate-400">Equipo<input required value={correctiveEquipment} onChange={event => setCorrectiveEquipment(event.target.value)} placeholder="Ej. CA13 o CR02" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
+                  <label className="text-xs text-slate-400">Equipo<select required value={correctiveEquipment} onChange={event => setCorrectiveEquipment(event.target.value)} className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none focus:border-sky-300/40"><option value="">Selecciona un equipo</option>{equipmentOptions.map(item => <option key={item.id} value={item.code}>{item.code}{item.description ? ` · ${item.description}` : ""}</option>)}</select></label>
                 </div>
                 <label className="text-xs text-slate-400">Reserva <span className="text-slate-600">(opcional)</span><input value={correctiveReservation} onChange={event => setCorrectiveReservation(event.target.value)} placeholder="Código de reserva o dejar vacío" className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" /></label>
                 <label className="text-xs text-slate-400">Descripción de operación<textarea required value={correctiveDescription} onChange={event => setCorrectiveDescription(event.target.value)} placeholder="Describe el trabajo correctivo" rows={3} className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-sm text-white outline-none focus:border-sky-300/40" /></label>
@@ -1902,6 +1911,15 @@ export default function Home() {
                         {importPreview.invalid} filas inválidas ·{" "}
                         {importPreview.duplicates} repeticiones de OT detectadas
                       </div>
+                      {importPreview.invalidRows.length > 0 && (
+                        <div className="mt-3 rounded-lg border border-rose-300/20 bg-rose-300/[0.06] p-3 text-xs text-rose-200">
+                          <div className="font-bold">Filas rechazadas (no se importarán)</div>
+                          <div className="mt-1 space-y-0.5 text-rose-200/80">
+                            {importPreview.invalidRows.slice(0, 8).map(item => <div key={`${item.rowNumber}-${item.reason}`}>Fila {item.rowNumber}{item.otNumber ? ` · OT ${item.otNumber}` : ""}: {item.reason}</div>)}
+                          </div>
+                          {importPreview.invalidRows.length > 8 && <div className="mt-1 text-rose-200/60">Y {importPreview.invalidRows.length - 8} filas más.</div>}
+                        </div>
+                      )}
                     </div>
                     <div className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold ${importPreview.detectedWeek ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-300/10 text-amber-200"}`}>
                       {importPreview.detectedWeek
@@ -2033,7 +2051,7 @@ export default function Home() {
                   <input required value={editingCorrective.otNumber} onChange={event => setEditingCorrective(current => current ? { ...current, otNumber: event.target.value } : current)} className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" />
                 </label>
                 <label className="text-xs text-slate-400">Equipo
-                  <input required value={editingCorrective.equipmentCode} onChange={event => setEditingCorrective(current => current ? { ...current, equipmentCode: event.target.value } : current)} className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 text-sm text-white outline-none focus:border-sky-300/40" />
+                  <select required value={editingCorrective.equipmentCode} onChange={event => setEditingCorrective(current => current ? { ...current, equipmentCode: event.target.value } : current)} className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none focus:border-sky-300/40"><option value="">Selecciona un equipo</option>{equipmentOptions.map(item => <option key={item.id} value={item.code}>{item.code}{item.description ? ` · ${item.description}` : ""}</option>)}</select>
                 </label>
               </div>
               <label className="text-xs text-slate-400">Reserva <span className="text-slate-600">(opcional)</span>
