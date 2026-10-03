@@ -73,12 +73,14 @@
 }
 
 @layer base {
-  * { @apply border-border; }
+  *, *::before, *::after { @apply border-border; box-sizing: border-box; }
+  html, body, #root { width: 100%; max-width: 100%; overflow-x: hidden; }
   html { scroll-behavior: smooth; }
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'DM Sans', system-ui, sans-serif;
     min-width: 320px;
+    overflow-x: hidden;
   }
   button, a, select, input, textarea { font: inherit; }
   button { cursor: pointer; }

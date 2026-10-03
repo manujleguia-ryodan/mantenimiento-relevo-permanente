@@ -639,6 +639,19 @@ export default function Home() {
     }
     return Array.from(groups.values());
   }, [rows]);
+  const filteredWorkshopGroups = useMemo(() => {
+    const query = equipmentSearch.trim().toLowerCase();
+    if (!query) return workshopGroups;
+    return workshopGroups.flatMap(group => {
+      const equipmentText = `${group.equipment?.code ?? ""} ${group.equipment?.description ?? ""}`.toLowerCase();
+      if (equipmentText.includes(query)) return [group];
+      const matchingRows = group.rows.filter(row => {
+        const fields = getImportedFields(row.workOrder.sourceData);
+        return [row.workOrder.otNumber, row.workOrder.description, ...Object.values(fields)].some(value => String(value ?? "").toLowerCase().includes(query));
+      });
+      return matchingRows.length ? [{ ...group, rows: matchingRows }] : [];
+    });
+  }, [workshopGroups, equipmentSearch]);
 
   const otTypeCounts = useMemo(() => rows.reduce(
     (counts, row) => {
@@ -1034,7 +1047,7 @@ export default function Home() {
             onClick={() => setMobileMenuOpen(false)}
           />
         )}
-        <main className="min-w-0 flex-1 px-4 pb-12 sm:px-6 lg:px-9 lg:pt-8">
+        <main className="min-w-0 max-w-full flex-1 overflow-x-hidden px-3 pb-8 sm:px-5 lg:px-7 lg:pt-6">
           <div className="mx-auto max-w-[1240px]">
             <section id="panel" className="scroll-mt-24 pt-5 lg:pt-0">
               <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
@@ -1308,33 +1321,30 @@ export default function Home() {
 
                 {activeSection === "equipos" && <section
                   id="equipos"
-                  className="mt-6 rounded-2xl border border-white/[0.07] bg-[#101718] p-5"
+                  className="mt-5 rounded-xl border border-white/[0.07] bg-[#101718] p-3"
                 >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
                         <Truck className="h-3.5 w-3.5" /> Área de trabajo
                       </div>
-                      <h2 className="mt-1 font-display text-2xl text-white">Equipos de mi guardia</h2>
-                      <p className="mt-1 text-sm text-slate-500">Gestiona aquí únicamente los equipos ingresados al taller y sus OTs.</p>
+                      <h2 className="mt-1 font-display text-xl text-white">Equipos de mi guardia</h2>
+                      <p className="mt-1 text-xs text-slate-500">Trabajo activo del taller. Busca por OT o Equipo.</p>
                     </div>
-                    <div className="rounded-xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs text-amber-200">
-                      {workshopGroups.length} equipo{workshopGroups.length === 1 ? "" : "s"} activo{workshopGroups.length === 1 ? "" : "s"}
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                      <div className="relative min-w-0 sm:w-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" /><input value={equipmentSearch} onChange={event => setEquipmentSearch(event.target.value)} placeholder="Buscar OT o equipo" aria-label="Buscar en equipos de mi guardia" className="h-9 w-full rounded-lg border border-emerald-300/20 bg-white/[0.035] pl-8 pr-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/50" /></div>
+                      <div className="whitespace-nowrap rounded-lg border border-amber-300/20 bg-amber-300/10 px-2.5 py-2 text-[11px] text-amber-200">{filteredWorkshopGroups.length} equipo{filteredWorkshopGroups.length === 1 ? "" : "s"}</div>
                     </div>
                   </div>
-                  <div className="mt-5 space-y-4">
-                    {workshopGroups
-                      .filter(group => {
-                        const query = equipmentSearch.trim().toLowerCase();
-                        return !query || `${group.equipment?.code ?? ""} ${group.equipment?.description ?? ""}`.toLowerCase().includes(query);
-                      })
+                  <div className="mt-3 space-y-2">
+                    {filteredWorkshopGroups
                       .map(group => (
-                        <article key={group.key} className="overflow-hidden rounded-2xl border border-emerald-300/15 bg-emerald-300/[0.035]">
-                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-300/10 text-emerald-300"><Truck className="h-5 w-5" /></div>
+                        <article key={group.key} className="overflow-hidden rounded-xl border border-emerald-300/15 bg-emerald-300/[0.035]">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.07] px-3 py-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-300/10 text-emerald-300"><Truck className="h-4 w-4" /></div>
                               <div>
-                                <div className="font-mono text-base font-bold text-emerald-100">{group.equipment?.code}</div>
+                                <div className="font-mono text-sm font-bold text-emerald-100">{group.equipment?.code}</div>
                                 <div className="text-[11px] text-slate-500">{group.equipment?.description || "Equipo operativo"} · {group.rows.length} OT</div>
                               </div>
                             </div>
@@ -1342,7 +1352,7 @@ export default function Home() {
                               type="button"
                               onClick={() => equipmentWorkshopMutation.mutate({ equipmentId: group.equipment!.id, active: false })}
                               disabled={equipmentWorkshopMutation.isPending}
-                              className="rounded-lg border border-rose-300/25 px-3 py-2 text-[11px] font-bold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
+                              className="rounded-lg border border-rose-300/25 px-2.5 py-1.5 text-[10px] font-bold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
                             >
                               Liberar Equipo
                             </button>
@@ -1355,7 +1365,7 @@ export default function Home() {
                               const requiresLogistics = row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
                               const description = row.workOrder.description || fields["Descripción de operación"] || fields.Descripcion || "Sin descripción";
                               return (
-                                <div key={row.workOrder.id} className="p-4">
+                                <div key={row.workOrder.id} className="p-3">
                                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                                     <div className="min-w-0 flex-1">
                                       <div className="flex flex-wrap items-center gap-2">
@@ -1364,8 +1374,8 @@ export default function Home() {
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
                                         {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Cerrada</span>}
                                       </div>
-                                      <p className="mt-2 text-sm leading-relaxed text-slate-300">{description}</p>
-                                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                                      <p className="mt-1 break-words text-xs leading-snug text-slate-300">{description}</p>
+                                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
                                         <span>Reserva: <b className="text-slate-300">{getReservationValue(row.workOrder.sourceData) || "—"}</b></span>
                                         <span>Responsable: <b className="text-slate-300">{row.state?.responsibleName || "Sin registrar"}</b></span>
                                         {row.execution?.status === "CERRADA_NOTIFICADA" && <span>Cierre: <b className="text-blue-200">{row.execution.executedByName || "Operador"} · {formatDate(row.execution.executedAt)}</b></span>}
@@ -1401,13 +1411,14 @@ export default function Home() {
                           </div>
                         </article>
                       ))}
-                    {!workshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-sm text-slate-500">No hay equipos activos en el taller. Ingresa un equipo desde “OT y recepción”.</div>}
+                    {!workshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay equipos activos en el taller. Ingresa un equipo desde “OT y recepción”.</div>}
+                    {workshopGroups.length > 0 && !filteredWorkshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay OT o equipos que coincidan con “{equipmentSearch}”.</div>}
                   </div>
                 </section>}
 
                 {activeSection === "ot" && <section
                   id="ot"
-                  className="mt-6 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-4"
+                  className="mt-5 scroll-mt-24 rounded-xl border border-white/[0.07] bg-[#101718] p-3"
                 >
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                     <div>
@@ -1446,8 +1457,9 @@ export default function Home() {
                         <input
                           value={search}
                           onChange={event => setSearch(event.target.value)}
-                          placeholder="Buscar OT, equipo o descripción"
-                          className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.035] pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40 sm:w-64"
+                          placeholder="Buscar OT o equipo"
+                          aria-label="Buscar por Número de OT o código de Equipo"
+                          className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.035] pl-9 pr-3 text-xs text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40 sm:w-60"
                         />
                       </div>
                     </div>
@@ -1458,20 +1470,20 @@ export default function Home() {
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-400" /> Parcial / pendiente</span>
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Cerrada</span>
                   </div>
-                  <div className="mt-4 max-h-[calc(100vh-360px)] min-h-[260px] overflow-auto rounded-xl border border-white/[0.06]">
-                    <table className="w-full min-w-max text-left">
+                  <div className="mt-3 max-h-[calc(100vh-340px)] min-h-[240px] max-w-full overflow-hidden rounded-xl border border-white/[0.06]">
+                    <table className="w-full table-fixed text-left">
                       <thead className="sticky top-0 z-10 bg-[#162022] text-[10px] uppercase tracking-[0.15em] text-slate-600">
                         <tr>
-                          <th className="whitespace-nowrap px-4 py-3 font-bold">
+                          <th className="break-words px-2 py-2 font-bold">
                             OT
                           </th>
-                          <th className="whitespace-nowrap px-4 py-3 font-bold">
+                          <th className="break-words px-2 py-2 font-bold">
                             Equipo
                           </th>
                           {excelColumns.map(column => (
                             <th
                               key={column}
-                              className="whitespace-nowrap px-3 py-3 font-bold"
+                              className="break-words px-2 py-2 font-bold"
                             >
                               {normalizeExcelHeader(column).includes("reserva")
                                 ? "Reserva"
@@ -1480,13 +1492,13 @@ export default function Home() {
                                   : column}
                             </th>
                           ))}
-                          <th className="whitespace-nowrap px-4 py-3 font-bold">
+                          <th className="break-words px-2 py-2 font-bold">
                             Recepción
                           </th>
-                          <th className="whitespace-nowrap px-4 py-3 font-bold">
+                          <th className="break-words px-2 py-2 font-bold">
                             Responsable / cierre
                           </th>
-                          <th className="whitespace-nowrap px-4 py-3 font-bold">
+                          <th className="break-words px-2 py-2 font-bold">
                             Actualizado
                           </th>
                         </tr>
@@ -1538,10 +1550,10 @@ export default function Home() {
                               key={row.workOrder.id}
                               className={`group border-l-2 transition ${rowTone} ${row.execution?.status === "CERRADA_NOTIFICADA" ? "border-l-blue-400" : state === "RECIBIDA" ? "border-l-emerald-400" : state === "PARCIAL" || state === "FALTA_RECIBIR" ? "border-l-orange-400" : "border-l-transparent"}`}
                             >
-                              <td className="whitespace-nowrap px-4 py-2.5 font-mono text-sm font-semibold text-white">
+                              <td className="break-words px-2 py-2 font-mono text-xs font-semibold text-white">
                                 {row.workOrder.otNumber}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-2.5 text-sm text-amber-200/85">
+                              <td className="break-words px-2 py-2 text-xs text-amber-200/85">
                                 <span>{row.equipment?.code ?? "—"}</span>
                               </td>
                               {excelColumns.map(column => {
@@ -1559,15 +1571,15 @@ export default function Home() {
                                 return (
                                   <td
                                     key={column}
-                                    className={`${isDescriptionColumn ? "min-w-[320px] max-w-[420px] whitespace-normal" : "max-w-[190px]"} px-3 py-2.5 text-xs text-slate-400`}
+                                    className="max-w-0 break-words px-2 py-2 text-[11px] text-slate-400"
                                   >
-                                    <div className={isDescriptionColumn ? "whitespace-normal break-words leading-relaxed" : "truncate"} title={value}>
+                                    <div className="break-words leading-snug" title={value}>
                                       {value}
                                     </div>
                                   </td>
                                 );
                               })}
-                              <td className="whitespace-nowrap px-4 py-2.5">
+                              <td className="break-words px-2 py-2">
                                 {requiresLogistics ? (
                                   <StatusPill status={state} />
                                 ) : (
@@ -1576,23 +1588,23 @@ export default function Home() {
                                   </span>
                                 )}
                               </td>
-                              <td className="min-w-[190px] px-4 py-2.5 text-xs text-slate-400">
+                              <td className="max-w-0 break-words px-2 py-2 text-[11px] text-slate-400">
                                 <div className="space-y-1.5">
                                   <div className="flex items-center justify-between gap-3">
                                     <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-600">Recepción</span>
-                                    <span className="truncate font-semibold text-slate-300">{row.state?.responsibleName || "Sin registrar"}</span>
+                                    <span className="break-words text-right font-semibold text-slate-300">{row.state?.responsibleName || "Sin registrar"}</span>
                                   </div>
                                   {row.execution?.status === "CERRADA_NOTIFICADA" && (
                                     <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] pt-1.5">
                                       <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-blue-300/60">Cierre</span>
-                                      <span className="truncate text-[10px] font-semibold text-blue-200" title={`${row.execution.executedByName || "Usuario"} · ${formatDate(row.execution.executedAt)}`}>
+                                      <span className="break-words text-right text-[10px] font-semibold text-blue-200" title={`${row.execution.executedByName || "Usuario"} · ${formatDate(row.execution.executedAt)}`}>
                                         {row.execution.executedByName || "Usuario"} · {formatDate(row.execution.executedAt)}
                                       </span>
                                     </div>
                                   )}
                                 </div>
                               </td>
-                              <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-500">
+                              <td className="break-words px-2 py-2 text-[10px] text-slate-500">
                                 {formatDate(row.state?.updatedAt)}
                               </td>
                             </tr>
@@ -1662,8 +1674,8 @@ export default function Home() {
                   ) : historicalQuery.isLoading ? (
                     <div className="mt-5 rounded-xl border border-white/[0.06] p-8 text-center text-sm text-slate-500">Buscando OT…</div>
                   ) : historicalQuery.data?.length ? (
-                    <div className="mt-5 overflow-x-auto rounded-xl border border-white/[0.06]">
-                      <table className="w-full min-w-[760px] text-left">
+                    <div className="mt-4 max-w-full overflow-hidden rounded-xl border border-white/[0.06]">
+                      <table className="w-full table-fixed text-left">
                         <thead className="bg-white/[0.035] text-[10px] uppercase tracking-[0.15em] text-slate-600">
                           <tr>
                             <th className="px-4 py-3 font-bold">Semana</th>
@@ -1681,13 +1693,13 @@ export default function Home() {
                             const historicalStatus = (row.state?.status ?? "SIN_REVISAR") as Status;
                             return (
                               <tr key={row.workOrder.id} className="hover:bg-white/[0.025]">
-                                <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-violet-200">SEM {row.week.weekNumber} · {row.week.year}</td>
-                                <td className="whitespace-nowrap px-4 py-3 font-mono text-sm font-semibold text-white">{row.workOrder.otNumber}</td>
-                                <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-amber-200">{row.equipment.code}</td>
-                                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">{getReservationValue(row.workOrder.sourceData) || "Sin reserva"}</td>
-                                <td className="max-w-[320px] px-4 py-3 text-xs text-slate-300" title={row.workOrder.description ?? fields["Descripción de operación"] ?? ""}>{row.workOrder.description ?? fields["Descripción de operación"] ?? "—"}</td>
-                                <td className="whitespace-nowrap px-4 py-3">{row.state ? <StatusPill status={historicalStatus} /> : <span className="text-xs text-slate-600">Sin revisar</span>}</td>
-                                <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{formatDate(row.state?.updatedAt)}</td>
+                                <td className="break-words px-2 py-2 text-[10px] font-semibold text-violet-200">SEM {row.week.weekNumber} · {row.week.year}</td>
+                                <td className="break-words px-2 py-2 font-mono text-xs font-semibold text-white">{row.workOrder.otNumber}</td>
+                                <td className="break-words px-2 py-2 font-mono text-xs text-amber-200">{row.equipment.code}</td>
+                                <td className="break-words px-2 py-2 text-[10px] text-slate-400">{getReservationValue(row.workOrder.sourceData) || "Sin reserva"}</td>
+                                <td className="max-w-0 break-words px-2 py-2 text-[10px] text-slate-300" title={row.workOrder.description ?? fields["Descripción de operación"] ?? ""}>{row.workOrder.description ?? fields["Descripción de operación"] ?? "—"}</td>
+                                <td className="break-words px-2 py-2">{row.state ? <StatusPill status={historicalStatus} /> : <span className="text-xs text-slate-600">Sin revisar</span>}</td>
+                                <td className="break-words px-2 py-2 text-[10px] text-slate-500">{formatDate(row.state?.updatedAt)}</td>
                               </tr>
                             );
                           })}
@@ -1927,8 +1939,8 @@ export default function Home() {
                         : "Semana no detectada · revisar campos"}
                     </div>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-max text-left text-xs">
+                  <div className="max-w-full overflow-hidden">
+                    <table className="w-full table-fixed text-left text-xs">
                       <thead className="bg-white/[0.03] uppercase tracking-wider text-slate-600">
                         <tr>
                           <th className="px-4 py-2.5">OT</th>
@@ -1937,7 +1949,7 @@ export default function Home() {
                           {importPreviewColumns.map(column => (
                             <th
                               key={column}
-                              className="whitespace-nowrap px-3 py-2.5"
+                              className="break-words px-2 py-2"
                             >
                               {column}
                             </th>
@@ -1947,10 +1959,10 @@ export default function Home() {
                       <tbody className="divide-y divide-white/[0.05]">
                         {importPreview.rows.slice(0, 7).map((row, index) => (
                           <tr key={`${row.otNumber}-${index}`}>
-                            <td className="whitespace-nowrap px-4 py-3 font-mono text-white">
+                            <td className="break-words px-2 py-2 font-mono text-white">
                               {row.otNumber}
                             </td>
-                            <td className="whitespace-nowrap px-4 py-3 text-amber-200">
+                            <td className="break-words px-2 py-2 text-amber-200">
                               {row.equipmentCode}
                             </td>
                             <td className="max-w-[310px] truncate px-4 py-3 text-slate-400">
