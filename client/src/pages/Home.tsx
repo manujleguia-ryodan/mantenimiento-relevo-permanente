@@ -27,6 +27,7 @@ import {
   Menu,
   PackageCheck,
   PanelLeftClose,
+  Pencil,
   RefreshCw,
   Search,
   Send,
@@ -34,6 +35,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Truck,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -240,6 +242,7 @@ export default function Home() {
   const [newFacilitatorName, setNewFacilitatorName] = useState("");
   const [newFacilitatorGuard, setNewFacilitatorGuard] = useState<Guard>("A");
   const [newFacilitatorPin, setNewFacilitatorPin] = useState("");
+  const [editingFacilitatorId, setEditingFacilitatorId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "TODOS">("TODOS");
   const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
@@ -335,6 +338,23 @@ export default function Home() {
     onSuccess: () => {
       toast.success("Facilitador creado.");
       setNewFacilitatorName(""); setNewFacilitatorPin("");
+      void utils.auth.accessUsers.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const updateFacilitatorMutation = trpc.maintenance.updateAccessCode.useMutation({
+    onSuccess: () => {
+      toast.success("Facilitador actualizado.");
+      setEditingFacilitatorId(null);
+      setNewFacilitatorName("");
+      setNewFacilitatorPin("");
+      void utils.auth.accessUsers.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const deleteFacilitatorMutation = trpc.maintenance.deleteAccessCode.useMutation({
+    onSuccess: () => {
+      toast.success("Facilitador eliminado permanentemente.");
       void utils.auth.accessUsers.invalidate();
     },
     onError: error => toast.error(error.message),
@@ -868,14 +888,28 @@ export default function Home() {
             <button type="button" onClick={logout} className="inline-flex items-center gap-2 rounded-xl border border-white/[0.1] px-3 py-2 text-xs font-bold text-slate-300 hover:bg-white/[0.05]"><LogOut className="h-4 w-4" /> Cambiar Guardia / Salir</button>
           </div>
           <div className="mt-8 grid gap-5 lg:grid-cols-[1fr_1.4fr]">
-            <form onSubmit={event => { event.preventDefault(); if (!/^\d{4}$/.test(newFacilitatorPin) || newFacilitatorName.trim().length < 2) return toast.error("Nombre y PIN de 4 dígitos son obligatorios."); createFacilitatorMutation.mutate({ label: newFacilitatorName.trim(), role: "facilitator", guard: newFacilitatorGuard, pin: newFacilitatorPin }); }} className="rounded-2xl border border-white/[0.08] bg-[#101718] p-5">
-              <h2 className="font-display text-2xl text-white">Crear facilitador</h2>
+            <form onSubmit={event => {
+              event.preventDefault();
+              if (!/^\d{4}$/.test(newFacilitatorPin) || newFacilitatorName.trim().length < 2) {
+                toast.error("Nombre y PIN de 4 dígitos son obligatorios.");
+                return;
+              }
+              if (editingFacilitatorId) {
+                updateFacilitatorMutation.mutate({ id: editingFacilitatorId, label: newFacilitatorName.trim(), guard: newFacilitatorGuard, pin: newFacilitatorPin });
+              } else {
+                createFacilitatorMutation.mutate({ label: newFacilitatorName.trim(), role: "facilitator", guard: newFacilitatorGuard, pin: newFacilitatorPin });
+              }
+            }} className="rounded-2xl border border-white/[0.08] bg-[#101718] p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div><h2 className="font-display text-2xl text-white">{editingFacilitatorId ? "Editar facilitador" : "Crear facilitador"}</h2><p className="mt-1 text-xs text-slate-500">{editingFacilitatorId ? "Actualiza nombre, guardia o PIN sin crear otro perfil." : "Cada guardia puede tener un solo facilitador activo."}</p></div>
+                {editingFacilitatorId && <button type="button" onClick={() => { setEditingFacilitatorId(null); setNewFacilitatorName(""); setNewFacilitatorPin(""); }} className="text-xs font-bold text-slate-400 hover:text-white">Cancelar</button>}
+              </div>
               <label className="mt-5 block text-xs font-bold uppercase tracking-wider text-slate-500">Nombre<input value={newFacilitatorName} onChange={event => setNewFacilitatorName(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-white outline-none" placeholder="Guardia 1" /></label>
               <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500">Guardia<select value={newFacilitatorGuard} onChange={event => setNewFacilitatorGuard(event.target.value as Guard)} className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-[#151e20] px-3 text-sm text-white outline-none">{GUARDS.map(item => <option key={item} value={item}>Guardia {GUARD_LABEL[item]}</option>)}</select></label>
               <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-slate-500">PIN de 4 dígitos<input inputMode="numeric" maxLength={4} value={newFacilitatorPin} onChange={event => setNewFacilitatorPin(event.target.value.replace(/\D/g, "").slice(0, 4))} className="mt-2 h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 font-mono text-lg tracking-[0.35em] text-white outline-none" placeholder="1234" /></label>
-              <button type="submit" disabled={createFacilitatorMutation.isPending} className="mt-5 w-full rounded-xl bg-amber-300 px-4 py-3 text-sm font-bold text-[#0a0f10] disabled:opacity-40">Guardar facilitador</button>
+              <button type="submit" disabled={createFacilitatorMutation.isPending || updateFacilitatorMutation.isPending} className="mt-5 w-full rounded-xl bg-amber-300 px-4 py-3 text-sm font-bold text-[#0a0f10] disabled:opacity-40">{editingFacilitatorId ? "Actualizar facilitador" : "Guardar facilitador"}</button>
             </form>
-            <div className="rounded-2xl border border-white/[0.08] bg-[#101718] p-5"><h2 className="font-display text-2xl text-white">Facilitadores activos</h2><div className="mt-4 space-y-2">{users.filter(user => user.id !== "admin").map(user => <div key={user.id} className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.025] px-4 py-3"><div><div className="font-semibold text-white">{user.label}</div><div className="text-xs text-slate-500">Guardia {GUARD_LABEL[user.guard as Guard]} · PIN protegido</div></div><span className="rounded-full bg-emerald-300/10 px-2 py-1 text-[10px] font-bold text-emerald-300">Activo</span></div>)}{users.filter(user => user.id !== "admin").length === 0 && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">Todavía no hay facilitadores creados.</div>}</div></div>
+            <div className="rounded-2xl border border-white/[0.08] bg-[#101718] p-5"><h2 className="font-display text-2xl text-white">Facilitadores activos</h2><div className="mt-4 space-y-2">{users.filter(user => user.id !== "admin").map(user => { const userId = Number(user.id); return <div key={user.id} className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] px-4 py-3"><div className="min-w-0"><div className="truncate font-semibold text-white">{user.label}</div><div className="text-xs text-slate-500">Guardia {GUARD_LABEL[user.guard as Guard]} · PIN protegido</div></div><div className="flex shrink-0 items-center gap-2"><button type="button" title="Editar facilitador" onClick={() => { setEditingFacilitatorId(userId); setNewFacilitatorName(user.label); setNewFacilitatorGuard(user.guard as Guard); setNewFacilitatorPin(""); }} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-300/20 px-2.5 py-2 text-xs font-bold text-sky-200 hover:bg-sky-300/10"><Pencil className="h-3.5 w-3.5" /> Editar</button><button type="button" title="Eliminar facilitador" onClick={() => { if (window.confirm(`¿Eliminar permanentemente a ${user.label}?`)) { deleteFacilitatorMutation.mutate({ id: userId }); if (editingFacilitatorId === userId) { setEditingFacilitatorId(null); setNewFacilitatorName(""); setNewFacilitatorPin(""); } } }} disabled={deleteFacilitatorMutation.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/25 bg-rose-300/[0.06] px-2.5 py-2 text-xs font-bold text-rose-200 hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /> Eliminar</button></div></div>; })}{users.filter(user => user.id !== "admin").length === 0 && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">Todavía no hay facilitadores creados.</div>}</div></div>
           </div>
         </div>
       </div>

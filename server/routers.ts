@@ -861,9 +861,34 @@ export const appRouter = router({
       .input(z.object({ label: z.string().trim().min(2).max(120), role: z.literal("facilitator"), guard: guardSchema, pin: z.string().regex(/^\d{4}$/, "El PIN debe tener exactamente 4 dígitos.") }))
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
+        const [existingGuard] = await db.select({ id: accessCodes.id }).from(accessCodes).where(and(eq(accessCodes.guard, input.guard), eq(accessCodes.active, true))).limit(1);
+        if (existingGuard) throw new TRPCError({ code: "CONFLICT", message: `Ya existe un facilitador activo para la Guardia ${input.guard === "A" ? "1" : input.guard === "B" ? "2" : input.guard === "C" ? "3" : "4"}.` });
         const { salt, hash } = hashAccessCode(input.pin);
         const inserted = await db.insert(accessCodes).values({ label: input.label, role: input.role, guard: input.guard, salt, codeHash: hash, createdById: ctx.user?.id ?? null });
         return { success: true, id: insertId(inserted) };
+      }),
+
+    updateAccessCode: adminProcedure
+      .input(z.object({ id: z.number().int().positive(), label: z.string().trim().min(2).max(120), guard: guardSchema, pin: z.string().regex(/^\d{4}$/, "El PIN debe tener exactamente 4 dígitos.") }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        const [current] = await db.select({ id: accessCodes.id, role: accessCodes.role, active: accessCodes.active }).from(accessCodes).where(eq(accessCodes.id, input.id)).limit(1);
+        if (!current || !current.active || current.role !== "facilitator") throw new TRPCError({ code: "NOT_FOUND", message: "Facilitador no encontrado." });
+        const [existingGuard] = await db.select({ id: accessCodes.id }).from(accessCodes).where(and(eq(accessCodes.guard, input.guard), eq(accessCodes.active, true))).limit(1);
+        if (existingGuard && existingGuard.id !== input.id) throw new TRPCError({ code: "CONFLICT", message: "Ya existe otro facilitador activo asignado a esa guardia." });
+        const { salt, hash } = hashAccessCode(input.pin);
+        await db.update(accessCodes).set({ label: input.label, guard: input.guard, salt, codeHash: hash }).where(eq(accessCodes.id, input.id));
+        return { success: true };
+      }),
+
+    deleteAccessCode: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        const [current] = await db.select({ id: accessCodes.id, role: accessCodes.role }).from(accessCodes).where(eq(accessCodes.id, input.id)).limit(1);
+        if (!current || current.role !== "facilitator") throw new TRPCError({ code: "NOT_FOUND", message: "Facilitador no encontrado." });
+        await db.delete(accessCodes).where(eq(accessCodes.id, input.id));
+        return { success: true };
       }),
 
     revokeAccessCode: adminProcedure
