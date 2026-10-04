@@ -60,7 +60,7 @@ export const warehouses = mysqlTable("warehouses", {
 export const workOrders = mysqlTable("workOrders", {
   id: int("id").autoincrement().primaryKey(), weekId: int("weekId").notNull(),
   otNumber: varchar("otNumber", { length: 80 }).notNull(), equipmentId: int("equipmentId").notNull(),
-  description: text("description"), sourceData: text("sourceData"),
+  description: text("description"), sourceData: text("sourceData"), fotoRepuesto: text("foto_repuesto"),
   isCancelled: boolean("isCancelled").default(false).notNull(),
   cancelledAt: timestamp("cancelledAt"), cancelledById: int("cancelledById"),
   cancellationReason: varchar("cancellationReason", { length: 500 }),

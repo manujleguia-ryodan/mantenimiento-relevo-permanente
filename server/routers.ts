@@ -777,6 +777,22 @@ export const appRouter = router({
         return { success: true, stateId: stateId! };
       }),
 
+    saveWorkOrderPhoto: operationalProcedure
+      .input(z.object({
+        workOrderId: z.number().int().positive(),
+        photoData: z.string().regex(/^data:image\/(webp|jpeg);base64,/, "La evidencia debe ser WebP o JPEG comprimido.").max(140000),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await requireDb();
+        const [workOrder] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1);
+        if (!workOrder) throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada." });
+        const encoded = input.photoData.split(",", 2)[1] ?? "";
+        const compressedBytes = Buffer.byteLength(encoded, "base64");
+        if (compressedBytes > 102400) throw new TRPCError({ code: "BAD_REQUEST", message: "La fotografía comprimida debe pesar menos de 100 KB." });
+        await db.update(workOrders).set({ fotoRepuesto: input.photoData }).where(eq(workOrders.id, input.workOrderId));
+        return { success: true, bytes: compressedBytes } as const;
+      }),
+
     markOperationalExecution: operationalProcedure
       .input(
         z.object({
@@ -814,6 +830,9 @@ export const appRouter = router({
           guard: input.guard,
           ...values,
         });
+        if (input.closed) {
+          await db.update(workOrders).set({ fotoRepuesto: null }).where(eq(workOrders.id, input.workOrderId));
+        }
         let equipmentDeactivated = false;
         if (input.closed) {
           const relatedOrders = await db.select({ id: workOrders.id })

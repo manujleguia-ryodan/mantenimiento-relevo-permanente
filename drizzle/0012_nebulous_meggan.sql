@@ -1,0 +1,1 @@
+ALTER TABLE `workOrders` ADD `foto_repuesto` text;

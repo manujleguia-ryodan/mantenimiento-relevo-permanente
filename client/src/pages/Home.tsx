@@ -12,6 +12,7 @@ import {
   ArrowRight,
   BarChart3,
   BellRing,
+  Camera,
   Check,
   ChevronDown,
   ClipboardCheck,
@@ -94,6 +95,26 @@ function formatDate(value: unknown) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+async function compressPhoto(file: File) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 800 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No se pudo preparar el compresor de imagen.");
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const qualities = [0.6, 0.5, 0.4, 0.3, 0.2];
+  for (const mime of ["image/webp", "image/jpeg"] as const) {
+    for (const quality of qualities) {
+      const encoded = canvas.toDataURL(mime, quality);
+      if (encoded.startsWith(`data:${mime};base64,`) && (encoded.length - encoded.indexOf(",") - 1) * 0.75 <= 100 * 1024) return encoded;
+    }
+  }
+  return canvas.toDataURL("image/jpeg", 0.6);
 }
 
 function detectWeekFromExcel(fileName: string, matrix: unknown[][]) {
@@ -443,6 +464,13 @@ export default function Home() {
       toast.success("Asignación de OTs actualizada.");
       setAssignmentModal(null);
       await utils.maintenance.dashboard.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const savePhotoMutation = trpc.maintenance.saveWorkOrderPhoto.useMutation({
+    onSuccess: result => {
+      toast.success(`Evidencia guardada (${Math.round(result.bytes / 1024)} KB).`);
+      void utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
   });
@@ -816,6 +844,27 @@ export default function Home() {
       sourceFileName: importPreview.fileName,
       rows: importPreview.rows,
     });
+  }
+
+  async function handlePhotoChange(workOrderId: number, event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Selecciona una imagen válida.");
+      return;
+    }
+    try {
+      const compressed = await compressPhoto(file);
+      const bytes = (compressed.length - compressed.indexOf(",") - 1) * 0.75;
+      if (bytes > 100 * 1024) {
+        toast.error("No se pudo comprimir la fotografía por debajo de 100 KB.");
+        return;
+      }
+      savePhotoMutation.mutate({ workOrderId, photoData: compressed });
+    } catch {
+      toast.error("No se pudo procesar la fotografía.");
+    }
   }
 
   function toggleEquipment(id: number) {
@@ -1382,6 +1431,10 @@ export default function Home() {
                                     <div className="min-w-0 flex-1">
                                       <div className="flex flex-wrap items-center gap-2">
                                         <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
+                                        <label title={row.workOrder.fotoRepuesto ? "Reemplazar evidencia fotográfica" : "Añadir evidencia fotográfica opcional"} className={`cursor-pointer rounded-md p-1 transition hover:bg-white/[0.08] ${row.workOrder.fotoRepuesto ? "text-emerald-300" : "text-slate-500 hover:text-amber-200"}`}>
+                                          <Camera className="h-3.5 w-3.5" />
+                                          <input type="file" accept="image/*" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending} />
+                                        </label>
                                         <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
                                         {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Cerrada</span>}
