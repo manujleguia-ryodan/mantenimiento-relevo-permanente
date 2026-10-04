@@ -780,17 +780,19 @@ export const appRouter = router({
     saveWorkOrderPhoto: operationalProcedure
       .input(z.object({
         workOrderId: z.number().int().positive(),
-        photoData: z.string().regex(/^data:image\/(webp|jpeg);base64,/, "La evidencia debe ser WebP o JPEG comprimido.").max(140000),
+        photoData: z.string().regex(/^data:image\/(webp|jpeg);base64,/, "La evidencia debe ser WebP o JPEG comprimido.").max(140000).nullable(),
       }))
       .mutation(async ({ input }) => {
         const db = await requireDb();
         const [workOrder] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.id, input.workOrderId)).limit(1);
         if (!workOrder) throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada." });
-        const encoded = input.photoData.split(",", 2)[1] ?? "";
-        const compressedBytes = Buffer.byteLength(encoded, "base64");
+        const [closedExecution] = await db.select({ id: otExecutions.id }).from(otExecutions).where(and(eq(otExecutions.workOrderId, input.workOrderId), eq(otExecutions.status, "CERRADA_NOTIFICADA"))).limit(1);
+        if (closedExecution) throw new TRPCError({ code: "CONFLICT", message: "La OT ya está cerrada; su evidencia no se puede modificar." });
+        const encoded = input.photoData?.split(",", 2)[1] ?? "";
+        const compressedBytes = input.photoData ? Buffer.byteLength(encoded, "base64") : 0;
         if (compressedBytes > 102400) throw new TRPCError({ code: "BAD_REQUEST", message: "La fotografía comprimida debe pesar menos de 100 KB." });
         await db.update(workOrders).set({ fotoRepuesto: input.photoData }).where(eq(workOrders.id, input.workOrderId));
-        return { success: true, bytes: compressedBytes } as const;
+        return { success: true, bytes: compressedBytes, deleted: input.photoData === null } as const;
       }),
 
     markOperationalExecution: operationalProcedure

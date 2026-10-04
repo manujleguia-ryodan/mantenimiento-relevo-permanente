@@ -469,7 +469,7 @@ export default function Home() {
   });
   const savePhotoMutation = trpc.maintenance.saveWorkOrderPhoto.useMutation({
     onSuccess: result => {
-      toast.success(`Evidencia guardada (${Math.round(result.bytes / 1024)} KB).`);
+      toast.success(result.deleted ? "Evidencia fotográfica eliminada." : `Evidencia guardada (${Math.round(result.bytes / 1024)} KB).`);
       void utils.maintenance.dashboard.invalidate();
     },
     onError: error => toast.error(error.message),
@@ -1433,8 +1433,9 @@ export default function Home() {
                                         <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
                                         <label title={row.workOrder.fotoRepuesto ? "Reemplazar evidencia fotográfica" : "Añadir evidencia fotográfica opcional"} className={`cursor-pointer rounded-md p-1 transition hover:bg-white/[0.08] ${row.workOrder.fotoRepuesto ? "text-emerald-300" : "text-slate-500 hover:text-amber-200"}`}>
                                           <Camera className="h-3.5 w-3.5" />
-                                          <input type="file" accept="image/*" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending} />
+                                          <input type="file" accept="image/*" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending || row.execution?.status === "CERRADA_NOTIFICADA"} />
                                         </label>
+                                        {row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
                                         <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
                                         {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Cerrada</span>}
