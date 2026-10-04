@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
-  InsertUser, equipment, guardAssignments, guardRelations, handoverItems, handovers, supervisorAssignments,
+  InsertUser, equipment, guardAssignments, guardWorkOrderAssignments, guardRelations, handoverItems, handovers, supervisorAssignments,
   maintenanceWeeks, otExecutions, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -60,6 +60,10 @@ export async function getDashboardData(
   const selectedIds = selected
     .map(item => item.equipmentId)
     .filter((id): id is number => Number.isSafeInteger(id) && id > 0);
+  const selectedWorkOrders = await db.select({ workOrderId: guardWorkOrderAssignments.workOrderId })
+    .from(guardWorkOrderAssignments)
+    .where(and(eq(guardWorkOrderAssignments.weekId, weekId), eq(guardWorkOrderAssignments.guard, guard)));
+  const selectedWorkOrderIds = selectedWorkOrders.map(item => item.workOrderId);
   const rows = await db.select({ workOrder: workOrders, equipment, state: otStates, execution: otExecutions, inheritedFrom: handovers.fromGuard })
     .from(workOrders).leftJoin(equipment, eq(workOrders.equipmentId, equipment.id))
     .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId), eq(otStates.guard, guard)))
@@ -92,7 +96,7 @@ export async function getDashboardData(
     requiresLogistics: hasReservation(row.workOrder.sourceData),
     pendingWarehouses: row.state?.id ? pendingByState.get(row.state.id) ?? [] : [],
   }));
-  return { week, guard, selectedEquipmentIds: selectedIds, rows: enrichedRows, selectedEquipment: weekEquipment.filter(item => selectedIds.includes(item.id)), allEquipment: weekEquipment, warehouses: await getWarehouses() };
+  return { week, guard, selectedEquipmentIds: selectedIds, selectedWorkOrderIds, rows: enrichedRows, selectedEquipment: weekEquipment.filter(item => selectedIds.includes(item.id)), allEquipment: weekEquipment, warehouses: await getWarehouses() };
 }
 
 export async function getOtHistory(workOrderId: number) { const db = await requireDb(); return db.select().from(otHistory).where(eq(otHistory.workOrderId, workOrderId)).orderBy(desc(otHistory.createdAt)); }

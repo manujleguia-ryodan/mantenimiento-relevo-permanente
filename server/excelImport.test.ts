@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mapExcelRows, rowsFromExcelMatrix } from "@shared/excelImport";
-import { buildGuardAssignmentRows, insertId } from "./routers";
+import { buildGuardAssignmentRows, buildGuardWorkOrderAssignmentRows, insertId } from "./routers";
 
 describe("Excel import mapping", () => {
   it("reads MySQL insert IDs from both direct and tuple results", () => {
@@ -12,6 +12,13 @@ describe("Excel import mapping", () => {
     expect(buildGuardAssignmentRows(1, "A", [0, -1, 3, 3, 7], 22)).toEqual([
       { weekId: 1, guard: "A", equipmentId: 3, selectedById: 22 },
       { weekId: 1, guard: "A", equipmentId: 7, selectedById: 22 },
+    ]);
+  });
+
+  it("assigns selected work orders once without creating equipment copies", () => {
+    expect(buildGuardWorkOrderAssignmentRows(4, "C", [101, 101, 0, 205], 33)).toEqual([
+      { weekId: 4, guard: "C", workOrderId: 101, selectedById: 33 },
+      { weekId: 4, guard: "C", workOrderId: 205, selectedById: 33 },
     ]);
   });
 

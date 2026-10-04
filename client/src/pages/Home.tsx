@@ -280,6 +280,8 @@ export default function Home() {
     []
   );
   const [equipmentSearch, setEquipmentSearch] = useState("");
+  const [assignmentModal, setAssignmentModal] = useState<{ equipmentId: number; equipmentCode: string; rows: any[] } | null>(null);
+  const [assignmentDraftIds, setAssignmentDraftIds] = useState<number[]>([]);
   const [relationsDraft, setRelationsDraft] = useState<
     Record<Guard, Guard | "">
   >({ A: "", B: "", C: "", D: "" });
@@ -436,6 +438,14 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const assignWorkOrdersMutation = trpc.maintenance.assignWorkOrdersToGuard.useMutation({
+    onSuccess: async () => {
+      toast.success("Asignación de OTs actualizada.");
+      setAssignmentModal(null);
+      await utils.maintenance.dashboard.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
   const receptionMutation = trpc.maintenance.updateReception.useMutation({
     onSuccess: () => {
       toast.success("Recepción actualizada y auditada.");
@@ -541,6 +551,7 @@ export default function Home() {
     : [];
   const selectedWeek = weeks.find(week => week.id === selectedWeekId);
   const selectedRelation = relationsDraft[guard];
+  const assignedWorkOrderIds = useMemo(() => new Set(dashboard.data?.selectedWorkOrderIds ?? []), [dashboard.data?.selectedWorkOrderIds]);
   const editingRequiresLogistics = Boolean(
     editingRow &&
       (editingRow.requiresLogistics ?? hasReservation(editingRow.workOrder.sourceData))
@@ -587,6 +598,7 @@ export default function Home() {
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     return rows.filter(row => {
+      if (assignedWorkOrderIds.has(row.workOrder.id)) return false;
       const state = (row.state?.status ?? "SIN_REVISAR") as Status;
       const warehouse = (row.pendingWarehouses ?? []).map((item: any) => item.warehouseCodeSnapshot).join(",") || "NINGUNO";
       const matchesSearch =
@@ -615,7 +627,7 @@ export default function Home() {
         (otTypeFilter === "PROGRAMADAS" && !isCorrective);
       return matchesSearch && matchesStatus && matchesWarehouse && matchesExecution && matchesOtType;
     });
-  }, [rows, search, statusFilter, warehouseFilter, executionFilter, otTypeFilter]);
+  }, [rows, search, statusFilter, warehouseFilter, executionFilter, otTypeFilter, assignedWorkOrderIds]);
 
   const groupedRows = useMemo(() => {
     const groups = new Map<string, { key: string; equipment: (typeof filteredRows)[number]["equipment"]; rows: typeof filteredRows }>();
@@ -631,14 +643,14 @@ export default function Home() {
   const workshopGroups = useMemo(() => {
     const groups = new Map<string, { key: string; equipment: (typeof rows)[number]["equipment"]; rows: typeof rows }>();
     for (const row of rows) {
-      if (!row.equipment?.activo_en_taller) continue;
+      if (!row.equipment || !assignedWorkOrderIds.has(row.workOrder.id)) continue;
       const key = String(row.equipment.id);
       const existing = groups.get(key);
       if (existing) existing.rows.push(row);
       else groups.set(key, { key, equipment: row.equipment, rows: [row] });
     }
     return Array.from(groups.values());
-  }, [rows]);
+  }, [rows, assignedWorkOrderIds]);
   const filteredWorkshopGroups = useMemo(() => {
     const query = equipmentSearch.trim().toLowerCase();
     if (!query) return workshopGroups;
@@ -1350,8 +1362,8 @@ export default function Home() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => equipmentWorkshopMutation.mutate({ equipmentId: group.equipment!.id, active: false })}
-                              disabled={equipmentWorkshopMutation.isPending}
+                              onClick={() => assignWorkOrdersMutation.mutate({ weekId: selectedWeekId!, guard, equipmentId: group.equipment!.id, workOrderIds: [] })}
+                              disabled={assignWorkOrdersMutation.isPending || !selectedWeekId}
                               className="rounded-lg border border-rose-300/25 px-2.5 py-1.5 text-[10px] font-bold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
                             >
                               Liberar Equipo
@@ -1516,11 +1528,11 @@ export default function Home() {
                                       <div className="text-[11px] text-slate-500">{group.equipment?.description || "Equipo sin descripción"} · {group.rows.length} OT asociada{group.rows.length === 1 ? "" : "s"}</div>
                                     </div>
                                   </div>
-                                  {group.equipment && !group.equipment.activo_en_taller && (
+                                  {group.equipment && (
                                     <button
                                       type="button"
-                                      onClick={() => equipmentWorkshopMutation.mutate({ equipmentId: group.equipment!.id, active: true })}
-                                      disabled={equipmentWorkshopMutation.isPending}
+                                      onClick={() => { const allEquipmentRows = rows.filter(row => row.equipment?.id === group.equipment!.id); const existingIds = allEquipmentRows.filter(row => assignedWorkOrderIds.has(row.workOrder.id)).map(row => row.workOrder.id); setAssignmentModal({ equipmentId: group.equipment!.id, equipmentCode: group.equipment!.code, rows: allEquipmentRows }); setAssignmentDraftIds(existingIds.length ? existingIds : allEquipmentRows.map(row => row.workOrder.id)); }}
+                                      disabled={assignWorkOrdersMutation.isPending}
                                       className="rounded-lg border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-[11px] font-bold text-amber-200 transition hover:bg-amber-300/20 disabled:opacity-40"
                                     >
                                       Ingresar a Guardia · {group.rows.length} OT
@@ -1769,6 +1781,28 @@ export default function Home() {
           </div>
         </main>
       </div>
+
+      {assignmentModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-amber-300/20 bg-[#11191a] shadow-2xl">
+            <div className="flex items-start justify-between border-b border-white/[0.07] p-4">
+              <div className="min-w-0"><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">Ingreso selectivo</div><h2 className="mt-1 font-display text-xl text-white">{assignmentModal.equipmentCode}</h2><p className="mt-1 text-xs text-slate-500">Selecciona las OTs que atenderá Guardia {GUARD_LABEL[guard]}. No se crean copias.</p></div>
+              <button type="button" onClick={() => setAssignmentModal(null)} className="rounded-lg p-2 text-slate-500 hover:bg-white/[0.05] hover:text-white" aria-label="Cerrar selector">×</button>
+            </div>
+            <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-2 text-xs"><span className="text-slate-500">{assignmentDraftIds.length} de {assignmentModal.rows.length} OT seleccionadas</span><div className="flex gap-2"><button type="button" onClick={() => setAssignmentDraftIds(assignmentModal.rows.map(row => row.workOrder.id))} className="rounded-md px-2 py-1 font-semibold text-amber-200 hover:bg-amber-300/10">Seleccionar Todas</button><button type="button" onClick={() => setAssignmentDraftIds([])} className="rounded-md px-2 py-1 font-semibold text-slate-400 hover:bg-white/[0.06]">Limpiar Selección</button></div></div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              <div className="space-y-1.5">
+                {assignmentModal.rows.map(row => {
+                  const checked = assignmentDraftIds.includes(row.workOrder.id);
+                  const description = row.workOrder.description || getImportedFields(row.workOrder.sourceData)["Descripción de operación"] || "Sin descripción";
+                  return <label key={row.workOrder.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 transition ${checked ? "border-amber-300/30 bg-amber-300/[0.08]" : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04]"}`}><input type="checkbox" checked={checked} onChange={() => setAssignmentDraftIds(current => checked ? current.filter(id => id !== row.workOrder.id) : [...current, row.workOrder.id])} className="mt-1 h-4 w-4 accent-amber-300" /><span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2 font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}{assignedWorkOrderIds.has(row.workOrder.id) && <span className="rounded border border-emerald-300/20 px-1.5 py-0.5 font-sans text-[9px] uppercase text-emerald-200">Asignada</span>}</span><span className="mt-0.5 block break-words text-xs text-slate-400">{description}</span><span className="mt-0.5 block text-[10px] text-slate-600">Reserva: {getReservationValue(row.workOrder.sourceData) || "—"}</span></span></label>;
+                })}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-white/[0.07] p-3"><button type="button" onClick={() => setAssignmentModal(null)} className="rounded-lg border border-white/[0.1] px-3 py-2 text-xs font-bold text-slate-400 hover:bg-white/[0.05]">Cancelar</button><button type="button" onClick={() => assignWorkOrdersMutation.mutate({ weekId: selectedWeekId!, guard, equipmentId: assignmentModal.equipmentId, workOrderIds: assignmentDraftIds })} disabled={assignWorkOrdersMutation.isPending || !selectedWeekId} className="rounded-lg bg-amber-300 px-4 py-2 text-xs font-bold text-[#0a0f10] disabled:opacity-40">{assignWorkOrdersMutation.isPending ? "Guardando…" : "Confirmar selección"}</button></div>
+          </div>
+        </div>
+      )}
 
       {showCorrectiveOt && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">

@@ -88,6 +88,19 @@ export const guardAssignments = mysqlTable("guardAssignments", {
   lookupIdx: index("guardAssignments_lookup_idx").on(table.weekId, table.guard),
 }));
 
+/** Asignación operativa de OTs concretas a una guardia; no replica la OT ni el equipo. */
+export const guardWorkOrderAssignments = mysqlTable("guardWorkOrderAssignments", {
+  id: int("id").autoincrement().primaryKey(),
+  weekId: int("weekId").notNull(),
+  guard: mysqlEnum("guard", ["A", "B", "C", "D"]).notNull(),
+  workOrderId: int("workOrderId").notNull(),
+  selectedById: int("selectedById"),
+  selectedAt: timestamp("selectedAt").defaultNow().notNull(),
+}, table => ({
+  assignmentUnique: uniqueIndex("guardWorkOrderAssignments_unique").on(table.weekId, table.guard, table.workOrderId),
+  lookupIdx: index("guardWorkOrderAssignments_lookup_idx").on(table.weekId, table.guard),
+}));
+
 /** Selección privada de equipos de cada Supervisor; no comparte asignaciones del Facilitador. */
 export const supervisorAssignments = mysqlTable("supervisorAssignments", {
   id: int("id").autoincrement().primaryKey(),

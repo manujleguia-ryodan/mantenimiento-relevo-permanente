@@ -6,6 +6,7 @@ import {
   accessCodes,
   equipment,
   guardAssignments,
+  guardWorkOrderAssignments,
   guardRelations,
   handoverItems,
   handovers,
@@ -138,6 +139,20 @@ export function buildGuardAssignmentRows(
     weekId,
     guard,
     equipmentId,
+    selectedById,
+  }));
+}
+
+export function buildGuardWorkOrderAssignmentRows(
+  weekId: number,
+  guard: "A" | "B" | "C" | "D",
+  workOrderIds: number[],
+  selectedById: number | null
+) {
+  return Array.from(new Set(workOrderIds.filter(id => Number.isSafeInteger(id) && id > 0))).map(workOrderId => ({
+    weekId,
+    guard,
+    workOrderId,
     selectedById,
   }));
 }
@@ -478,6 +493,11 @@ export const appRouter = router({
             selectedById: ctx.user?.id ?? null,
           });
         }
+        const [workOrderAssignment] = await db.select({ id: guardWorkOrderAssignments.id })
+          .from(guardWorkOrderAssignments)
+          .where(and(eq(guardWorkOrderAssignments.weekId, input.weekId), eq(guardWorkOrderAssignments.guard, input.guard), eq(guardWorkOrderAssignments.workOrderId, workOrderId)))
+          .limit(1);
+        if (!workOrderAssignment) await db.insert(guardWorkOrderAssignments).values({ weekId: input.weekId, guard: input.guard, workOrderId, selectedById: ctx.user?.id ?? null });
         return { success: true, updated, workOrderId, equipmentId } as const;
       }),
 
@@ -559,17 +579,21 @@ export const appRouter = router({
           }
           const sourceData = JSON.stringify({ Reserva: row.reservation ?? "", "Descripción de operación": row.description, Tipo: "Correctiva", Responsable: ctx.user?.name ?? "Operador logístico" });
           const [existingWorkOrder] = await db.select().from(workOrders).where(eq(workOrders.otNumber, row.otNumber)).limit(1);
+          let workOrderId: number;
           if (existingWorkOrder) {
             await moveWorkOrderToWeek(db, existingWorkOrder.id, existingWorkOrder.weekId, input.weekId);
             await db.update(workOrders).set({ weekId: input.weekId, equipmentId, description: row.description, sourceData, isCancelled: false, cancelledAt: null, cancelledById: null, cancellationReason: null }).where(eq(workOrders.id, existingWorkOrder.id));
             updated += 1;
             duplicates += 1;
+            workOrderId = existingWorkOrder.id;
           } else {
-            await db.insert(workOrders).values({ weekId: input.weekId, otNumber: row.otNumber, equipmentId, description: row.description, sourceData });
+            workOrderId = insertId(await db.insert(workOrders).values({ weekId: input.weekId, otNumber: row.otNumber, equipmentId, description: row.description, sourceData }));
             created += 1;
           }
           const [assignment] = await db.select({ id: guardAssignments.id }).from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.guard), eq(guardAssignments.equipmentId, equipmentId))).limit(1);
           if (!assignment) await db.insert(guardAssignments).values({ weekId: input.weekId, guard: input.guard, equipmentId, selectedById: ctx.user?.id ?? null });
+          const [workOrderAssignment] = await db.select({ id: guardWorkOrderAssignments.id }).from(guardWorkOrderAssignments).where(and(eq(guardWorkOrderAssignments.weekId, input.weekId), eq(guardWorkOrderAssignments.guard, input.guard), eq(guardWorkOrderAssignments.workOrderId, workOrderId))).limit(1);
+          if (!workOrderAssignment) await db.insert(guardWorkOrderAssignments).values({ weekId: input.weekId, guard: input.guard, workOrderId, selectedById: ctx.user?.id ?? null });
         }
         return { success: true, created, updated, duplicates } as const;
       }),
@@ -620,6 +644,35 @@ export const appRouter = router({
             }))
           );
         }
+        return getDashboardData(input.weekId, input.guard);
+      }),
+
+    assignWorkOrdersToGuard: facilitatorProcedure
+      .input(z.object({
+        weekId: z.number().int().positive(),
+        guard: guardSchema,
+        equipmentId: z.number().int().positive(),
+        workOrderIds: z.array(z.number().int().positive()),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const equipmentOrders = await db.select({ id: workOrders.id })
+          .from(workOrders)
+          .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.equipmentId, input.equipmentId), eq(workOrders.isCancelled, false)));
+        const allowedIds = new Set(equipmentOrders.map(order => order.id));
+        if (input.workOrderIds.some(id => !allowedIds.has(id))) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Solo puedes asignar OTs del equipo y semana seleccionados." });
+        }
+        const equipmentOrderIds = equipmentOrders.map(order => order.id);
+        if (equipmentOrderIds.length) {
+          await db.delete(guardWorkOrderAssignments).where(and(
+            eq(guardWorkOrderAssignments.weekId, input.weekId),
+            eq(guardWorkOrderAssignments.guard, input.guard),
+            inArray(guardWorkOrderAssignments.workOrderId, equipmentOrderIds),
+          ));
+        }
+        const assignmentRows = buildGuardWorkOrderAssignmentRows(input.weekId, input.guard, input.workOrderIds, ctx.user?.id ?? null);
+        if (assignmentRows.length) await db.insert(guardWorkOrderAssignments).values(assignmentRows);
         return getDashboardData(input.weekId, input.guard);
       }),
 
