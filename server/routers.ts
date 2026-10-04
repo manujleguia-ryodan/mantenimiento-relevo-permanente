@@ -1012,7 +1012,7 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const db = await requireDb();
         const [current] = await db.select({ id: accessCodes.id, role: accessCodes.role }).from(accessCodes).where(eq(accessCodes.id, input.id)).limit(1);
-        if (!current || current.role !== "facilitator") throw new TRPCError({ code: "NOT_FOUND", message: "Facilitador no encontrado." });
+        if (!current || !["facilitator", "supervisor"].includes(current.role)) throw new TRPCError({ code: "NOT_FOUND", message: "Acceso operativo no encontrado." });
         await db.delete(accessCodes).where(eq(accessCodes.id, input.id));
         return { success: true };
       }),
