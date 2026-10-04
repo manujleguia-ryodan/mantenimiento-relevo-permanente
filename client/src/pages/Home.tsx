@@ -303,6 +303,7 @@ export default function Home() {
   const [equipmentSearch, setEquipmentSearch] = useState("");
   const [assignmentModal, setAssignmentModal] = useState<{ equipmentId: number; equipmentCode: string; rows: any[] } | null>(null);
   const [assignmentDraftIds, setAssignmentDraftIds] = useState<number[]>([]);
+  const [photoPreview, setPhotoPreview] = useState<{ otNumber: string; src: string } | null>(null);
   const [relationsDraft, setRelationsDraft] = useState<
     Record<Guard, Guard | "">
   >({ A: "", B: "", C: "", D: "" });
@@ -1435,6 +1436,7 @@ export default function Home() {
                                           <Camera className="h-3.5 w-3.5" />
                                           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending || row.execution?.status === "CERRADA_NOTIFICADA"} />
                                         </label>
+                                        {row.workOrder.fotoRepuesto && <button type="button" title="Ver evidencia fotográfica" aria-label={`Ver evidencia de OT ${row.workOrder.otNumber}`} onClick={() => setPhotoPreview({ otNumber: row.workOrder.otNumber, src: row.workOrder.fotoRepuesto! })} className="overflow-hidden rounded-md border border-emerald-300/25 bg-black/20 p-0.5 transition hover:border-emerald-200"><img src={row.workOrder.fotoRepuesto} alt={`Evidencia fotográfica de OT ${row.workOrder.otNumber}`} className="h-8 w-8 object-cover" /></button>}
                                         {row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
                                         <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
@@ -1858,6 +1860,14 @@ export default function Home() {
         </div>
       )}
 
+      {photoPreview && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`Evidencia fotográfica de OT ${photoPreview.otNumber}`} onClick={() => setPhotoPreview(null)}>
+          <div className="relative flex max-h-[90vh] max-w-[min(92vw,900px)] flex-col rounded-2xl border border-emerald-300/20 bg-[#11191a] p-3 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 px-1 pb-2"><div><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300">Evidencia fotográfica</div><div className="font-mono text-sm font-bold text-white">OT {photoPreview.otNumber}</div></div><button type="button" onClick={() => setPhotoPreview(null)} className="rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white" aria-label="Cerrar fotografía"><X className="h-5 w-5" /></button></div>
+            <img src={photoPreview.src} alt={`Evidencia fotográfica ampliada de OT ${photoPreview.otNumber}`} className="max-h-[78vh] max-w-full rounded-xl object-contain" />
+          </div>
+        </div>
+      )}
       {showCorrectiveOt && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-sm">
           <div className="w-full max-w-xl rounded-2xl border border-sky-300/20 bg-[#11191a] shadow-2xl">
