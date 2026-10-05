@@ -1523,8 +1523,39 @@ export default function Home() {
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-400" /> Parcial / pendiente</span>
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Finalizada</span>
                   </div>
-                  <div className="mt-3 max-h-[calc(100vh-340px)] min-h-[240px] max-w-full overflow-hidden rounded-xl border border-white/[0.06]">
-                    <table className="w-full table-fixed text-left">
+                  <div className="mt-3 max-h-[calc(100vh-340px)] min-h-[240px] max-w-full overflow-y-auto rounded-xl border border-white/[0.06]">
+                    <div className="space-y-3 p-2 md:hidden">
+                      {groupedRows.map(group => (
+                        <article key={group.key} className="overflow-hidden rounded-xl border border-amber-300/15 bg-amber-300/[0.035]">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.07] px-3 py-2.5">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <Truck className="h-4 w-4 shrink-0 text-amber-300" />
+                              <div className="min-w-0">
+                                <div className="font-mono text-sm font-bold text-amber-100">{group.equipment?.code ?? "SIN_EQUIPO"}</div>
+                                <div className="break-words text-[11px] text-slate-500">{group.equipment?.description || "Equipo sin descripción"} · {group.rows.length} OT</div>
+                              </div>
+                            </div>
+                            {group.equipment && <button type="button" onClick={() => { const allEquipmentRows = rows.filter(row => row.equipment?.id === group.equipment!.id); const existingIds = allEquipmentRows.filter(row => assignedWorkOrderIds.has(row.workOrder.id)).map(row => row.workOrder.id); setAssignmentModal({ equipmentId: group.equipment!.id, equipmentCode: group.equipment!.code, rows: allEquipmentRows }); setAssignmentDraftIds(existingIds.length ? existingIds : allEquipmentRows.map(row => row.workOrder.id)); }} disabled={assignWorkOrdersMutation.isPending} className="rounded-lg border border-amber-300/25 bg-amber-300/10 px-2.5 py-2 text-[10px] font-bold text-amber-200 disabled:opacity-40">Ingresar a Guardia</button>}
+                          </div>
+                          <div className="divide-y divide-white/[0.06]">
+                            {group.rows.map(row => {
+                              const state = (row.state?.status ?? "SIN_REVISAR") as Status;
+                              const fields = getImportedFields(row.workOrder.sourceData);
+                              const description = row.workOrder.description || fields["Descripción de operación"] || fields.Descripcion || "Sin descripción";
+                              const reservation = getReservationValue(row.workOrder.sourceData);
+                              const isFinalized = row.execution?.status === "CERRADA_NOTIFICADA";
+                              return <div key={row.workOrder.id} className="space-y-2 bg-[#11191a] p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>{isFinalized ? <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Finalizada</span> : <StatusPill status={state} />}</div>
+                                <div className="grid gap-1 text-xs sm:grid-cols-2"><div><span className="text-slate-600">Equipo: </span><b className="text-amber-200">{row.equipment?.code ?? "—"}</b></div><div><span className="text-slate-600">Reserva: </span><span className="break-words text-slate-300">{reservation || "Sin reserva"}</span></div></div>
+                                <p className="break-words text-xs leading-relaxed text-slate-300"><span className="text-slate-600">Descripción: </span>{description}</p>
+                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500"><span>Recepción: <b className="text-slate-300">{row.state?.responsibleName || "Sin registrar"}</b></span>{isFinalized && <span>Cierre: <b className="text-blue-200">{row.execution?.executedByName || "Usuario"}</b></span>}</div>
+                              </div>;
+                            })}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                    <table className="hidden w-full table-fixed text-left md:table">
                       <thead className="sticky top-0 z-10 bg-[#162022] text-[10px] uppercase tracking-[0.15em] text-slate-600">
                         <tr>
                           <th className="break-words px-2 py-2 font-bold">

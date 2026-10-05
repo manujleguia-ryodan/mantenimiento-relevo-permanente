@@ -673,7 +673,11 @@ export const appRouter = router({
         }
         const assignmentRows = buildGuardWorkOrderAssignmentRows(input.weekId, input.guard, input.workOrderIds, ctx.user?.id ?? null);
         if (assignmentRows.length) await db.insert(guardWorkOrderAssignments).values(assignmentRows);
-        await db.update(equipment).set({ activo_en_taller: input.workOrderIds.length > 0 }).where(eq(equipment.id, input.equipmentId));
+        const remainingAssignments = await db.select({ id: guardWorkOrderAssignments.id })
+          .from(guardWorkOrderAssignments)
+          .innerJoin(workOrders, eq(guardWorkOrderAssignments.workOrderId, workOrders.id))
+          .where(and(eq(guardWorkOrderAssignments.weekId, input.weekId), eq(workOrders.equipmentId, input.equipmentId), eq(workOrders.isCancelled, false)));
+        await db.update(equipment).set({ activo_en_taller: remainingAssignments.length > 0 }).where(eq(equipment.id, input.equipmentId));
         return getDashboardData(input.weekId, input.guard);
       }),
 
