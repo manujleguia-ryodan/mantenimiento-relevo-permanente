@@ -44,8 +44,12 @@ export function filterActiveWorkshopEquipment<T extends { activo_en_taller?: boo
   return equipment.filter(item => item.activo_en_taller === true);
 }
 
+export function isWorkOrderClosed(status?: string | null) {
+  return status === "CERRADA_NOTIFICADA";
+}
+
 export function areAllWorkOrdersClosed(statuses: Array<string | null | undefined>) {
-  return statuses.length > 0 && statuses.every(status => status === "CERRADA_NOTIFICADA");
+  return statuses.length > 0 && statuses.every(isWorkOrderClosed);
 }
 
 export function canPurgeSapRescheduledWorkOrder(input: {

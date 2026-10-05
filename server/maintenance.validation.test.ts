@@ -8,6 +8,7 @@ import {
   getPendingWarehouseLabel,
   getReservationValue,
   hasReservation,
+  isWorkOrderClosed,
   isCorrectiveWorkOrder,
   validateReceptionInput,
 } from "@shared/maintenance";
@@ -78,6 +79,18 @@ describe("maintenance business rules", () => {
     expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "CERRADA_NOTIFICADA"])).toBe(true);
     expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "ABIERTA"])).toBe(false);
     expect(areAllWorkOrdersClosed([])).toBe(false);
+  });
+
+  it("excludes closed OTs from a subsequent equipment re-entry", () => {
+    const orders = [
+      { ot: "OT1", status: "CERRADA_NOTIFICADA" },
+      { ot: "OT2", status: "PARCIAL" },
+      { ot: "OT3", status: undefined },
+      { ot: "OT4", status: "CERRADA_NOTIFICADA" },
+    ];
+    expect(orders.filter(order => !isWorkOrderClosed(order.status)).map(order => order.ot)).toEqual(["OT2", "OT3"]);
+    expect(isWorkOrderClosed("CERRADA_NOTIFICADA")).toBe(true);
+    expect(isWorkOrderClosed("PARCIAL")).toBe(false);
   });
 
   it("purges only SAP OTs still sin revisar and keeps protected records", () => {

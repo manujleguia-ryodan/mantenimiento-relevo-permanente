@@ -6,7 +6,7 @@ import {
   type ExcelImportInvalidRow,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder } from "@shared/maintenance";
+import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder, isWorkOrderClosed } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -541,6 +541,9 @@ export default function Home() {
     );
   }, [operationalEquipment, equipmentSearch]);
   const rows = dashboard.data?.rows ?? [];
+  const getPendingReentryRows = (equipmentId: number) => rows.filter(row =>
+    row.equipment?.id === equipmentId && !isWorkOrderClosed(row.execution?.status)
+  );
   const excelColumns = useMemo(() => {
     const first = rows.find(row => row.workOrder.sourceData)?.workOrder
       .sourceData;
@@ -1535,7 +1538,7 @@ export default function Home() {
                                 <div className="break-words text-[11px] text-slate-500">{group.equipment?.description || "Equipo sin descripción"} · {group.rows.length} OT</div>
                               </div>
                             </div>
-                            {group.equipment && <button type="button" onClick={() => { const allEquipmentRows = rows.filter(row => row.equipment?.id === group.equipment!.id); const existingIds = allEquipmentRows.filter(row => assignedWorkOrderIds.has(row.workOrder.id)).map(row => row.workOrder.id); setAssignmentModal({ equipmentId: group.equipment!.id, equipmentCode: group.equipment!.code, rows: allEquipmentRows }); setAssignmentDraftIds(existingIds.length ? existingIds : allEquipmentRows.map(row => row.workOrder.id)); }} disabled={assignWorkOrdersMutation.isPending} className="rounded-lg border border-amber-300/25 bg-amber-300/10 px-2.5 py-2 text-[10px] font-bold text-amber-200 disabled:opacity-40">Ingresar a Guardia</button>}
+                            {group.equipment && <button type="button" onClick={() => { const pendingRows = getPendingReentryRows(group.equipment!.id); if (!pendingRows.length) { toast.error("Este equipo no tiene OTs pendientes de ingreso. Todas sus OTs están cerradas."); return; } const existingIds = pendingRows.filter(row => assignedWorkOrderIds.has(row.workOrder.id)).map(row => row.workOrder.id); setAssignmentModal({ equipmentId: group.equipment!.id, equipmentCode: group.equipment!.code, rows: pendingRows }); setAssignmentDraftIds(existingIds.length ? existingIds : pendingRows.map(row => row.workOrder.id)); }} disabled={assignWorkOrdersMutation.isPending} className="rounded-lg border border-amber-300/25 bg-amber-300/10 px-2.5 py-2 text-[10px] font-bold text-amber-200 disabled:opacity-40">Ingresar a Guardia</button>}
                           </div>
                           <div className="divide-y divide-white/[0.06]">
                             {group.rows.map(row => {
@@ -1603,7 +1606,7 @@ export default function Home() {
                                   {group.equipment && (
                                     <button
                                       type="button"
-                                      onClick={() => { const allEquipmentRows = rows.filter(row => row.equipment?.id === group.equipment!.id); const existingIds = allEquipmentRows.filter(row => assignedWorkOrderIds.has(row.workOrder.id)).map(row => row.workOrder.id); setAssignmentModal({ equipmentId: group.equipment!.id, equipmentCode: group.equipment!.code, rows: allEquipmentRows }); setAssignmentDraftIds(existingIds.length ? existingIds : allEquipmentRows.map(row => row.workOrder.id)); }}
+                                      onClick={() => { const pendingRows = getPendingReentryRows(group.equipment!.id); if (!pendingRows.length) { toast.error("Este equipo no tiene OTs pendientes de ingreso. Todas sus OTs están cerradas."); return; } const existingIds = pendingRows.filter(row => assignedWorkOrderIds.has(row.workOrder.id)).map(row => row.workOrder.id); setAssignmentModal({ equipmentId: group.equipment!.id, equipmentCode: group.equipment!.code, rows: pendingRows }); setAssignmentDraftIds(existingIds.length ? existingIds : pendingRows.map(row => row.workOrder.id)); }}
                                       disabled={assignWorkOrdersMutation.isPending}
                                       className="rounded-lg border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-[11px] font-bold text-amber-200 transition hover:bg-amber-300/20 disabled:opacity-40"
                                     >

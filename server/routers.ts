@@ -41,6 +41,7 @@ import {
   canPurgeSapRescheduledWorkOrder,
   canReviewReception,
   hasReservation,
+  isWorkOrderClosed,
   validateReceptionInput,
 } from "@shared/maintenance";
 import {
@@ -656,12 +657,21 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         const db = await requireDb();
-        const equipmentOrders = await db.select({ id: workOrders.id })
+        const equipmentOrders = await db.select({ id: workOrders.id, executionStatus: otExecutions.status })
           .from(workOrders)
+          .leftJoin(otExecutions, and(
+            eq(otExecutions.workOrderId, workOrders.id),
+            eq(otExecutions.weekId, input.weekId),
+            eq(otExecutions.guard, input.guard),
+          ))
           .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.equipmentId, input.equipmentId), eq(workOrders.isCancelled, false)));
         const allowedIds = new Set(equipmentOrders.map(order => order.id));
         if (input.workOrderIds.some(id => !allowedIds.has(id))) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Solo puedes asignar OTs del equipo y semana seleccionados." });
+        }
+        const closedIds = new Set(equipmentOrders.filter(order => isWorkOrderClosed(order.executionStatus)).map(order => order.id));
+        if (input.workOrderIds.some(id => closedIds.has(id))) {
+          throw new TRPCError({ code: "CONFLICT", message: "Las OTs cerradas no pueden volver a ingresar a la guardia." });
         }
         const equipmentOrderIds = equipmentOrders.map(order => order.id);
         if (equipmentOrderIds.length) {
