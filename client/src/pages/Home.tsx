@@ -623,7 +623,7 @@ export default function Home() {
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     return rows.filter(row => {
-      if (assignedWorkOrderIds.has(row.workOrder.id)) return false;
+      if (row.equipment?.activo_en_taller === true && assignedWorkOrderIds.has(row.workOrder.id)) return false;
       const state = (row.state?.status ?? "SIN_REVISAR") as Status;
       const warehouse = (row.pendingWarehouses ?? []).map((item: any) => item.warehouseCodeSnapshot).join(",") || "NINGUNO";
       const matchesSearch =
@@ -668,7 +668,7 @@ export default function Home() {
   const workshopGroups = useMemo(() => {
     const groups = new Map<string, { key: string; equipment: (typeof rows)[number]["equipment"]; rows: typeof rows }>();
     for (const row of rows) {
-      if (!row.equipment || !assignedWorkOrderIds.has(row.workOrder.id)) continue;
+      if (!row.equipment || row.equipment.activo_en_taller !== true || !assignedWorkOrderIds.has(row.workOrder.id)) continue;
       const key = String(row.equipment.id);
       const existing = groups.get(key);
       if (existing) existing.rows.push(row);
@@ -1425,7 +1425,7 @@ export default function Home() {
                                         {row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
                                         <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
-                                        {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Cerrada</span>}
+                                        {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Finalizada</span>}
                                       </div>
                                       <p className="mt-1 break-words text-xs leading-snug text-slate-300">{description}</p>
                                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
@@ -1521,7 +1521,7 @@ export default function Home() {
                     <span className="text-slate-400">Estados visuales:</span>
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Recibida</span>
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-400" /> Parcial / pendiente</span>
-                    <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Cerrada</span>
+                    <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Finalizada</span>
                   </div>
                   <div className="mt-3 max-h-[calc(100vh-340px)] min-h-[240px] max-w-full overflow-hidden rounded-xl border border-white/[0.06]">
                     <table className="w-full table-fixed text-left">

@@ -849,6 +849,9 @@ export const appRouter = router({
           if (relatedOrders.length && relatedExecutions.length === relatedOrders.length && areAllWorkOrdersClosed(relatedExecutions.map(item => item.status))) {
             await db.update(equipment).set({ activo_en_taller: false }).where(eq(equipment.id, workOrder.equipmentId));
             await db.delete(guardAssignments).where(eq(guardAssignments.equipmentId, workOrder.equipmentId));
+            if (relatedIds.length) {
+              await db.delete(guardWorkOrderAssignments).where(inArray(guardWorkOrderAssignments.workOrderId, relatedIds));
+            }
             await db.delete(supervisorAssignments).where(eq(supervisorAssignments.equipmentId, workOrder.equipmentId));
             equipmentDeactivated = true;
           }
