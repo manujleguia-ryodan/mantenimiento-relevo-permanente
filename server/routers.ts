@@ -765,7 +765,7 @@ export const appRouter = router({
             message: "Esta OT ya fue recibida/revisada y no se puede revisar nuevamente.",
           });
         }
-        const responsibleName = input.responsibleName?.trim() || ctx.user?.name || ctx.user?.email || "Usuario actual";
+          const responsibleName = ctx.user?.name || ctx.user?.email || "Usuario actual";
         const newPendingWarehouse = warehouseCodes.join(", ") || null;
         let stateId: number;
         await db.transaction(async tx => {

@@ -260,7 +260,6 @@ export default function Home() {
   const [pin, setPin] = useState("");
   const [loginError, setLoginError] = useState("");
   const [selectedWeekId, setSelectedWeekId] = useState<number | null>(null);
-  const [guard, setGuard] = useState<Guard>("A");
   const [newFacilitatorName, setNewFacilitatorName] = useState("");
   const [newFacilitatorGuard, setNewFacilitatorGuard] = useState<Guard>("A");
   const [newFacilitatorPin, setNewFacilitatorPin] = useState("");
@@ -336,6 +335,7 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const operatorName = session?.name ?? "Operador logístico";
   const assignedGuard: Guard = session?.guard ?? "A";
+  const guard: Guard = assignedGuard;
   const isFacilitator = session?.role === "facilitator";
   const canCloseOt = isFacilitator;
 
@@ -585,10 +585,6 @@ export default function Home() {
     editingRow &&
       (editingRow.requiresLogistics ?? hasReservation(editingRow.workOrder.sourceData))
   );
-
-  useEffect(() => {
-    setGuard(assignedGuard);
-  }, [assignedGuard]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
@@ -1184,17 +1180,6 @@ export default function Home() {
                         </option>
                       ))}
                     </select>
-                  </div>
-                  <div className="flex items-center gap-1 rounded-xl bg-white/[0.04] p-1">
-                    {GUARDS.map(item => (
-                      <button
-                        key={item}
-                        onClick={() => setGuard(item)}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${guard === item ? "bg-amber-300 text-[#0a0f10]" : "text-slate-500 hover:text-white"}`}
-                      >
-                        Guardia {GUARD_LABEL[item]}
-                      </button>
-                    ))}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-500">
