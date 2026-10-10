@@ -6,7 +6,7 @@ import {
   type ExcelImportInvalidRow,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder, isWorkOrderClosed } from "@shared/maintenance";
+import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder, isEquipmentCycleFinalized, isWorkOrderClosed, type EquipmentCycleFilter } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -298,6 +298,7 @@ export default function Home() {
   const [showRelations, setShowRelations] = useState(false);
   const [editingRow, setEditingRow] = useState<any | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [historyOnly, setHistoryOnly] = useState(false);
   const [showHandover, setShowHandover] = useState(false);
   const [handoverTo, setHandoverTo] = useState<Guard>("B");
   const [handoverId, setHandoverId] = useState<number | null>(null);
@@ -305,6 +306,7 @@ export default function Home() {
     []
   );
   const [equipmentSearch, setEquipmentSearch] = useState("");
+  const [equipmentCycleFilter, setEquipmentCycleFilter] = useState<EquipmentCycleFilter>("TODOS");
   const [assignmentModal, setAssignmentModal] = useState<{ equipmentId: number; equipmentCode: string; rows: any[] } | null>(null);
   const [assignmentDraftIds, setAssignmentDraftIds] = useState<number[]>([]);
   const [photoPreview, setPhotoPreview] = useState<{ otNumber: string; src: string } | null>(null);
@@ -684,10 +686,29 @@ export default function Home() {
     }
     return Array.from(groups.values());
   }, [rows, assignedWorkOrderIds]);
+  const finalizedWorkshopGroups = useMemo(() => {
+    const candidateEquipmentIds = new Set(
+      rows
+        .filter(row => row.equipment && (assignedWorkOrderIds.has(row.workOrder.id) || isWorkOrderClosed(row.execution?.status)))
+        .map(row => row.equipment!.id)
+    );
+    const groups = new Map<string, { key: string; equipment: (typeof rows)[number]["equipment"]; rows: typeof rows }>();
+    for (const row of rows) {
+      if (!row.equipment || !candidateEquipmentIds.has(row.equipment.id)) continue;
+      const key = String(row.equipment.id);
+      const existing = groups.get(key);
+      if (existing) existing.rows.push(row);
+      else groups.set(key, { key, equipment: row.equipment, rows: [row] });
+    }
+    return Array.from(groups.values()).filter(group =>
+      isEquipmentCycleFinalized(group.rows.map(row => row.execution?.status))
+    );
+  }, [rows, assignedWorkOrderIds]);
+  const visibleWorkshopGroups = equipmentCycleFilter === "FINALIZADOS" ? finalizedWorkshopGroups : workshopGroups;
   const filteredWorkshopGroups = useMemo(() => {
     const query = equipmentSearch.trim().toLowerCase();
-    if (!query) return workshopGroups;
-    return workshopGroups.flatMap(group => {
+    if (!query) return visibleWorkshopGroups;
+    return visibleWorkshopGroups.flatMap(group => {
       const equipmentText = `${group.equipment?.code ?? ""} ${group.equipment?.description ?? ""}`.toLowerCase();
       if (equipmentText.includes(query)) return [group];
       const matchingRows = group.rows.filter(row => {
@@ -696,7 +717,7 @@ export default function Home() {
       });
       return matchingRows.length ? [{ ...group, rows: matchingRows }] : [];
     });
-  }, [workshopGroups, equipmentSearch]);
+  }, [visibleWorkshopGroups, equipmentSearch]);
 
   const otTypeCounts = useMemo(() => rows.reduce(
     (counts, row) => {
@@ -740,6 +761,7 @@ export default function Home() {
 
   function openEdit(row: any) {
     setEditingRow(row);
+    setHistoryOnly(false);
     setStatusDraft((row.state?.status ?? "SIN_REVISAR") as Status);
     setWarehouseCodesDraft((row.pendingWarehouses ?? []).map((item: any) => item.warehouseCodeSnapshot));
     setResponsibleDraft(operatorName);
@@ -1395,6 +1417,13 @@ export default function Home() {
                       <p className="mt-1 text-xs text-slate-500">Trabajo activo del taller. Busca por OT o Equipo.</p>
                     </div>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                      <div className="grid grid-cols-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Filtro de equipos">
+                        {(["TODOS", "PENDIENTES", "FINALIZADOS"] as EquipmentCycleFilter[]).map(filter => (
+                          <button key={filter} type="button" role="tab" aria-selected={equipmentCycleFilter === filter} onClick={() => setEquipmentCycleFilter(filter)} className={`rounded-md px-2 py-1.5 text-[10px] font-bold transition ${equipmentCycleFilter === filter ? (filter === "FINALIZADOS" ? "bg-blue-300 text-[#071014]" : "bg-amber-300 text-[#071014]") : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}>
+                            {filter === "TODOS" ? "Todos" : filter === "PENDIENTES" ? "Pendientes" : "Finalizados"}
+                          </button>
+                        ))}
+                      </div>
                       <div className="relative min-w-0 sm:w-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" /><input value={equipmentSearch} onChange={event => setEquipmentSearch(event.target.value)} placeholder="Buscar OT o equipo" aria-label="Buscar en equipos de mi guardia" className="h-9 w-full rounded-lg border border-emerald-300/20 bg-white/[0.035] pl-8 pr-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/50" /></div>
                       <div className="whitespace-nowrap rounded-lg border border-amber-300/20 bg-amber-300/10 px-2.5 py-2 text-[11px] text-amber-200">{filteredWorkshopGroups.length} equipo{filteredWorkshopGroups.length === 1 ? "" : "s"}</div>
                     </div>
@@ -1411,14 +1440,14 @@ export default function Home() {
                                 <div className="text-[11px] text-slate-500">{group.equipment?.description || "Equipo operativo"} · {group.rows.length} OT</div>
                               </div>
                             </div>
-                            <button
+                            {equipmentCycleFilter !== "FINALIZADOS" && <button
                               type="button"
                               onClick={() => assignWorkOrdersMutation.mutate({ weekId: selectedWeekId!, guard, equipmentId: group.equipment!.id, workOrderIds: [] })}
                               disabled={assignWorkOrdersMutation.isPending || !selectedWeekId}
                               className="rounded-lg border border-rose-300/25 px-2.5 py-1.5 text-[10px] font-bold text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"
                             >
                               Liberar Equipo
-                            </button>
+                            </button>}
                           </div>
                           <div className="divide-y divide-white/[0.06]">
                             {group.rows.map(row => {
@@ -1433,12 +1462,12 @@ export default function Home() {
                                     <div className="min-w-0 flex-1">
                                       <div className="flex flex-wrap items-center gap-2">
                                         <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
-                                        <label title={row.workOrder.fotoRepuesto ? "Reemplazar evidencia fotográfica" : "Añadir evidencia fotográfica opcional"} className={`cursor-pointer rounded-md p-1 transition hover:bg-white/[0.08] ${row.workOrder.fotoRepuesto ? "text-emerald-300" : "text-slate-500 hover:text-amber-200"}`}>
+                                        <label title={row.workOrder.fotoRepuesto ? "Ver evidencia fotográfica" : "Evidencia no disponible"} className={`rounded-md p-1 ${row.workOrder.fotoRepuesto ? "text-emerald-300" : "text-slate-600"}`}>
                                           <Camera className="h-3.5 w-3.5" />
-                                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending || row.execution?.status === "CERRADA_NOTIFICADA"} />
+                                          {equipmentCycleFilter !== "FINALIZADOS" && <input type="file" accept="image/*" capture="environment" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending || row.execution?.status === "CERRADA_NOTIFICADA"} />}
                                         </label>
                                         {row.workOrder.fotoRepuesto && <button type="button" title="Ver evidencia fotográfica" aria-label={`Ver evidencia de OT ${row.workOrder.otNumber}`} onClick={() => setPhotoPreview({ otNumber: row.workOrder.otNumber, src: row.workOrder.fotoRepuesto! })} className="overflow-hidden rounded-md border border-emerald-300/25 bg-black/20 p-0.5 transition hover:border-emerald-200"><img src={row.workOrder.fotoRepuesto} alt={`Evidencia fotográfica de OT ${row.workOrder.otNumber}`} className="h-8 w-8 object-cover" /></button>}
-                                        {row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
+                                        {equipmentCycleFilter !== "FINALIZADOS" && row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
                                         <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
                                         {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Finalizada</span>}
@@ -1451,6 +1480,8 @@ export default function Home() {
                                       </div>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                                      {equipmentCycleFilter === "FINALIZADOS" && <button type="button" onClick={() => { setEditingRow(row); setHistoryOnly(true); setShowHistory(true); }} className="rounded-lg border border-blue-300/25 px-3 py-2 text-[11px] font-bold text-blue-200 transition hover:bg-blue-300/10"><History className="mr-1 inline h-3.5 w-3.5" />Historial</button>}
+                                      {equipmentCycleFilter !== "FINALIZADOS" && <>
                                       {requiresLogistics && (
                                         !canReviewReception(row.state?.status as Status | undefined) ? (
                                           <span className="rounded-xl border border-emerald-300/20 bg-emerald-300/[0.08] px-3 py-2 text-xs font-bold text-emerald-200">Revisada</span>
@@ -1472,6 +1503,7 @@ export default function Home() {
                                           <button type="button" onClick={() => { if (window.confirm("¿Anular esta OT correctiva? Se conservará en el historial.")) cancelCorrectiveOtMutation.mutate({ workOrderId: row.workOrder.id }); }} disabled={cancelCorrectiveOtMutation.isPending} className="rounded-lg border border-rose-300/20 px-3 py-2 text-[11px] font-bold text-rose-200 transition hover:bg-rose-300/10 disabled:opacity-40">Anular</button>
                                         </>
                                       )}
+                                      </>}
                                     </div>
                                   </div>
                                 </div>
@@ -1480,8 +1512,8 @@ export default function Home() {
                           </div>
                         </article>
                       ))}
-                    {!workshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay equipos activos en el taller. Ingresa un equipo desde “OT y recepción”.</div>}
-                    {workshopGroups.length > 0 && !filteredWorkshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay OT o equipos que coincidan con “{equipmentSearch}”.</div>}
+                    {!visibleWorkshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">{equipmentCycleFilter === "FINALIZADOS" ? "No hay equipos finalizados en este ciclo." : "No hay equipos pendientes en el taller. Ingresa un equipo desde “OT y recepción”."}</div>}
+                    {visibleWorkshopGroups.length > 0 && !filteredWorkshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay OT o equipos que coincidan con “{equipmentSearch}”.</div>}
                   </div>
                 </section>}
 
@@ -2230,7 +2262,7 @@ export default function Home() {
                   OT {editingRow.workOrder.otNumber}
                 </div>
                 <h2 className="mt-1 font-display text-2xl text-white">
-                  Registrar recepción
+                  {historyOnly ? "Consulta de OT finalizada" : "Registrar recepción"}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {editingRow.equipment?.code} ·{" "}
@@ -2263,7 +2295,7 @@ export default function Home() {
                       <button
                         key={status}
                         onClick={() => setStatusDraft(status)}
-                        disabled={!isFacilitator}
+                        disabled={historyOnly || !isFacilitator}
                         className={`rounded-xl border p-3 text-left transition ${statusDraft === status ? STATUS_META[status].tone : "border-white/[0.07] bg-white/[0.025] text-slate-500 hover:border-white/15"}`}
                       >
                         <div
@@ -2285,7 +2317,7 @@ export default function Home() {
                   <div className="mt-3 space-y-2">
                     {(bootstrap.data?.warehouses ?? []).map((warehouse: any) => (
                       <label key={warehouse.code} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-300 hover:bg-white/[0.04]">
-                        <input type="checkbox" disabled={!isFacilitator} checked={warehouseCodesDraft.includes(warehouse.code)} onChange={event => setWarehouseCodesDraft(current => event.target.checked ? [...current, warehouse.code] : current.filter(code => code !== warehouse.code))} className="h-4 w-4 accent-amber-300" />
+                        <input type="checkbox" disabled={historyOnly || !isFacilitator} checked={warehouseCodesDraft.includes(warehouse.code)} onChange={event => setWarehouseCodesDraft(current => event.target.checked ? [...current, warehouse.code] : current.filter(code => code !== warehouse.code))} className="h-4 w-4 accent-amber-300" />
                         {warehouse.name}
                       </label>
                     ))}
@@ -2306,7 +2338,7 @@ export default function Home() {
                   <textarea
                     value={noteDraft}
                     onChange={event => setNoteDraft(event.target.value)}
-                    disabled={!isFacilitator}
+                    disabled={historyOnly || !isFacilitator}
                   rows={4}
                   placeholder="Ej.: pendiente reserva de almacén 2"
                   className="mt-2 w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.035] p-3 text-sm normal-case tracking-normal text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40"
@@ -2322,7 +2354,7 @@ export default function Home() {
                 <button
                   onClick={submitReception}
                   disabled={
-                    !isFacilitator || receptionMutation.isPending ||
+                    historyOnly || !isFacilitator || receptionMutation.isPending ||
                     (statusDraft !== "RECIBIDA" && statusDraft !== "REVISADO" && !warehouseCodesDraft.length)
                   }
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-bold text-[#0a0f10] disabled:cursor-not-allowed disabled:opacity-40"

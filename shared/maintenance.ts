@@ -52,6 +52,12 @@ export function areAllWorkOrdersClosed(statuses: Array<string | null | undefined
   return statuses.length > 0 && statuses.every(isWorkOrderClosed);
 }
 
+export type EquipmentCycleFilter = "TODOS" | "PENDIENTES" | "FINALIZADOS";
+
+export function isEquipmentCycleFinalized(statuses: Array<string | null | undefined>) {
+  return areAllWorkOrdersClosed(statuses);
+}
+
 export function canPurgeSapRescheduledWorkOrder(input: {
   isInNewExcel: boolean;
   isCorrective: boolean;

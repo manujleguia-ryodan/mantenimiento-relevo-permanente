@@ -8,6 +8,7 @@ import {
   getPendingWarehouseLabel,
   getReservationValue,
   hasReservation,
+  isEquipmentCycleFinalized,
   isWorkOrderClosed,
   isCorrectiveWorkOrder,
   validateReceptionInput,
@@ -86,6 +87,22 @@ describe("maintenance business rules", () => {
     expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "CERRADA_NOTIFICADA"])).toBe(true);
     expect(areAllWorkOrdersClosed(["CERRADA_NOTIFICADA", "ABIERTA"])).toBe(false);
     expect(areAllWorkOrdersClosed([])).toBe(false);
+  });
+
+  it("classifies a cycle from every OT, not from a single OT", () => {
+    expect(isEquipmentCycleFinalized([
+      "CERRADA_NOTIFICADA",
+      "CERRADA_NOTIFICADA",
+      "CERRADA_NOTIFICADA",
+      "CERRADA_NOTIFICADA",
+    ])).toBe(true);
+    expect(isEquipmentCycleFinalized([
+      "CERRADA_NOTIFICADA",
+      "CERRADA_NOTIFICADA",
+      "CERRADA_NOTIFICADA",
+      "PARCIAL",
+    ])).toBe(false);
+    expect(isEquipmentCycleFinalized(["CERRADA_NOTIFICADA", "REVISADO"])).toBe(false);
   });
 
   it("excludes closed OTs from a subsequent equipment re-entry", () => {
