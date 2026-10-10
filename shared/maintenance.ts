@@ -53,9 +53,20 @@ export function areAllWorkOrdersClosed(statuses: Array<string | null | undefined
 }
 
 export type EquipmentCycleFilter = "TODOS" | "PENDIENTES" | "FINALIZADOS";
+export type OtCycleFilter = "TODAS" | "SIN_REVISAR" | "PENDIENTES" | "REVISADAS" | "FINALIZADAS";
 
 export function isEquipmentCycleFinalized(statuses: Array<string | null | undefined>) {
   return areAllWorkOrdersClosed(statuses);
+}
+
+export function matchesOtCycleFilter(input: { receptionStatus?: string | null; executionStatus?: string | null; hasReceptionState?: boolean }, filter: OtCycleFilter) {
+  const finalized = isWorkOrderClosed(input.executionStatus);
+  if (filter === "TODAS") return true;
+  if (filter === "FINALIZADAS") return finalized;
+  if (finalized) return false;
+  if (filter === "SIN_REVISAR") return !input.hasReceptionState || !input.receptionStatus || input.receptionStatus === "SIN_REVISAR";
+  if (filter === "PENDIENTES") return input.receptionStatus === "PARCIAL" || input.receptionStatus === "FALTA_RECIBIR";
+  return input.receptionStatus === "REVISADO";
 }
 
 export function canPurgeSapRescheduledWorkOrder(input: {

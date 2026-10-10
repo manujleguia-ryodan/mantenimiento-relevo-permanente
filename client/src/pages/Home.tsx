@@ -6,7 +6,7 @@ import {
   type ExcelImportInvalidRow,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder, isEquipmentCycleFinalized, isWorkOrderClosed, type EquipmentCycleFilter } from "@shared/maintenance";
+import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder, isWorkOrderClosed, matchesOtCycleFilter, type OtCycleFilter } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -273,6 +273,7 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<Status | "TODOS">("TODOS");
   const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
   const [otTypeFilter, setOtTypeFilter] = useState<"PROGRAMADAS" | "CORRECTIVAS" | "TODAS">("TODAS");
+  const [otCycleFilter, setOtCycleFilter] = useState<OtCycleFilter>("TODAS");
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
   const [historicalEquipmentSearch, setHistoricalEquipmentSearch] = useState("");
@@ -306,7 +307,6 @@ export default function Home() {
     []
   );
   const [equipmentSearch, setEquipmentSearch] = useState("");
-  const [equipmentCycleFilter, setEquipmentCycleFilter] = useState<EquipmentCycleFilter>("TODOS");
   const [assignmentModal, setAssignmentModal] = useState<{ equipmentId: number; equipmentCode: string; rows: any[] } | null>(null);
   const [assignmentDraftIds, setAssignmentDraftIds] = useState<number[]>([]);
   const [photoPreview, setPhotoPreview] = useState<{ otNumber: string; src: string } | null>(null);
@@ -655,14 +655,15 @@ export default function Home() {
         executionFilter === "TODAS" ||
         (executionFilter === "CERRADAS" && row.execution?.status === "CERRADA_NOTIFICADA") ||
         (executionFilter === "PENDIENTES" && row.execution?.status !== "CERRADA_NOTIFICADA");
+      const matchesCycle = matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) }, otCycleFilter);
       const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
       const matchesOtType =
         otTypeFilter === "TODAS" ||
         (otTypeFilter === "CORRECTIVAS" && isCorrective) ||
         (otTypeFilter === "PROGRAMADAS" && !isCorrective);
-      return matchesSearch && matchesStatus && matchesWarehouse && matchesExecution && matchesOtType;
+      return matchesSearch && matchesStatus && matchesWarehouse && matchesExecution && matchesOtType && matchesCycle;
     });
-  }, [rows, search, statusFilter, warehouseFilter, executionFilter, otTypeFilter, assignedWorkOrderIds]);
+  }, [rows, search, statusFilter, warehouseFilter, executionFilter, otTypeFilter, otCycleFilter, assignedWorkOrderIds]);
 
   const groupedRows = useMemo(() => {
     const groups = new Map<string, { key: string; equipment: (typeof filteredRows)[number]["equipment"]; rows: typeof filteredRows }>();
@@ -678,33 +679,20 @@ export default function Home() {
   const workshopGroups = useMemo(() => {
     const groups = new Map<string, { key: string; equipment: (typeof rows)[number]["equipment"]; rows: typeof rows }>();
     for (const row of rows) {
-      if (!row.equipment || row.equipment.activo_en_taller !== true || !assignedWorkOrderIds.has(row.workOrder.id) || isWorkOrderClosed(row.execution?.status)) continue;
+      const isAssignedToTurn = assignedWorkOrderIds.has(row.workOrder.id);
+      const isHistoricalForTurn = isWorkOrderClosed(row.execution?.status);
+      const belongsToFilter = otCycleFilter === "FINALIZADAS"
+        ? isHistoricalForTurn
+        : isAssignedToTurn && !isHistoricalForTurn;
+      if (!row.equipment || !belongsToFilter || !matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) }, otCycleFilter)) continue;
       const key = String(row.equipment.id);
       const existing = groups.get(key);
       if (existing) existing.rows.push(row);
       else groups.set(key, { key, equipment: row.equipment, rows: [row] });
     }
     return Array.from(groups.values());
-  }, [rows, assignedWorkOrderIds]);
-  const finalizedWorkshopGroups = useMemo(() => {
-    const candidateEquipmentIds = new Set(
-      rows
-        .filter(row => row.equipment && (assignedWorkOrderIds.has(row.workOrder.id) || isWorkOrderClosed(row.execution?.status)))
-        .map(row => row.equipment!.id)
-    );
-    const groups = new Map<string, { key: string; equipment: (typeof rows)[number]["equipment"]; rows: typeof rows }>();
-    for (const row of rows) {
-      if (!row.equipment || !candidateEquipmentIds.has(row.equipment.id)) continue;
-      const key = String(row.equipment.id);
-      const existing = groups.get(key);
-      if (existing) existing.rows.push(row);
-      else groups.set(key, { key, equipment: row.equipment, rows: [row] });
-    }
-    return Array.from(groups.values()).filter(group =>
-      isEquipmentCycleFinalized(group.rows.map(row => row.execution?.status))
-    );
-  }, [rows, assignedWorkOrderIds]);
-  const visibleWorkshopGroups = equipmentCycleFilter === "FINALIZADOS" ? finalizedWorkshopGroups : workshopGroups;
+  }, [rows, assignedWorkOrderIds, otCycleFilter]);
+  const visibleWorkshopGroups = workshopGroups;
   const filteredWorkshopGroups = useMemo(() => {
     const query = equipmentSearch.trim().toLowerCase();
     if (!query) return visibleWorkshopGroups;
@@ -728,6 +716,15 @@ export default function Home() {
     },
     { programadas: 0, correctivas: 0 }
   ), [rows]);
+  const otCycleCounts = useMemo(() => rows.reduce((counts, row) => {
+    const filterInput = { receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) };
+    if (matchesOtCycleFilter(filterInput, "FINALIZADAS")) counts.FINALIZADAS += 1;
+    else if (matchesOtCycleFilter(filterInput, "SIN_REVISAR")) counts.SIN_REVISAR += 1;
+    else if (matchesOtCycleFilter(filterInput, "PENDIENTES")) counts.PENDIENTES += 1;
+    else if (matchesOtCycleFilter(filterInput, "REVISADAS")) counts.REVISADAS += 1;
+    counts.TODAS += 1;
+    return counts;
+  }, { TODAS: 0, SIN_REVISAR: 0, PENDIENTES: 0, REVISADAS: 0, FINALIZADAS: 0 }), [rows]);
 
   const kpis = useMemo(() => {
     const logisticsRows = rows.filter(
@@ -978,6 +975,7 @@ export default function Home() {
     setExecutionFilter("TODAS");
     setWarehouseFilter("TODOS");
     setOtTypeFilter("TODAS");
+    setOtCycleFilter("TODAS");
   }
 
   if (!session) {
@@ -1092,8 +1090,8 @@ export default function Home() {
           <nav className="mt-3 space-y-1">
             {[
               { id: "panel", label: "Panel de control", icon: BarChart3 },
-              { id: "equipos", label: "Equipos de mi guardia", icon: Truck },
-              { id: "ot", label: "OT y recepción", icon: ClipboardCheck },
+              { id: "equipos", label: "Equipos del turno", icon: Truck },
+              { id: "ot", label: "Plan semanal", icon: ClipboardCheck },
               { id: "historico", label: "Histórico de OT", icon: History },
             ].filter(item => item.id !== "relevo" || isFacilitator).map(item => (
               <button
@@ -1413,18 +1411,18 @@ export default function Home() {
                       <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
                         <Truck className="h-3.5 w-3.5" /> Área de trabajo
                       </div>
-                      <h2 className="mt-1 font-display text-xl text-white">Equipos de mi guardia</h2>
-                      <p className="mt-1 text-xs text-slate-500">Trabajo activo del taller. Busca por OT o Equipo.</p>
+                      <h2 className="mt-1 font-display text-xl text-white">Equipos del turno</h2>
+                      <p className="mt-1 text-xs text-slate-500">Trabajo del turno actual. Busca por OT o Equipo.</p>
                     </div>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                      <div className="grid grid-cols-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Filtro de equipos">
-                        {(["TODOS", "PENDIENTES", "FINALIZADOS"] as EquipmentCycleFilter[]).map(filter => (
-                          <button key={filter} type="button" role="tab" aria-selected={equipmentCycleFilter === filter} onClick={() => setEquipmentCycleFilter(filter)} className={`rounded-md px-2 py-1.5 text-[10px] font-bold transition ${equipmentCycleFilter === filter ? (filter === "FINALIZADOS" ? "bg-blue-300 text-[#071014]" : "bg-amber-300 text-[#071014]") : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}>
-                            {filter === "TODOS" ? "Todos" : filter === "PENDIENTES" ? "Pendientes" : "Finalizados"}
+                      <div className="grid grid-cols-5 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Filtro de OTs del turno">
+                        {(["TODAS", "SIN_REVISAR", "PENDIENTES", "REVISADAS", "FINALIZADAS"] as OtCycleFilter[]).map(filter => (
+                          <button key={filter} type="button" role="tab" aria-selected={otCycleFilter === filter} onClick={() => setOtCycleFilter(filter)} className={`rounded-md px-1.5 py-1.5 text-[9px] font-bold transition ${otCycleFilter === filter ? (filter === "FINALIZADAS" ? "bg-blue-300 text-[#071014]" : "bg-amber-300 text-[#071014]") : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}>
+                            {filter === "TODAS" ? "Todas" : filter === "SIN_REVISAR" ? "Sin revisar" : filter === "PENDIENTES" ? "Pendiente" : filter === "REVISADAS" ? "Revisado" : "Finalizado"}
                           </button>
                         ))}
                       </div>
-                      <div className="relative min-w-0 sm:w-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" /><input value={equipmentSearch} onChange={event => setEquipmentSearch(event.target.value)} placeholder="Buscar OT o equipo" aria-label="Buscar en equipos de mi guardia" className="h-9 w-full rounded-lg border border-emerald-300/20 bg-white/[0.035] pl-8 pr-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/50" /></div>
+                      <div className="relative min-w-0 sm:w-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" /><input value={equipmentSearch} onChange={event => setEquipmentSearch(event.target.value)} placeholder="Buscar OT o equipo" aria-label="Buscar en equipos del turno" className="h-9 w-full rounded-lg border border-emerald-300/20 bg-white/[0.035] pl-8 pr-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/50" /></div>
                       <div className="whitespace-nowrap rounded-lg border border-amber-300/20 bg-amber-300/10 px-2.5 py-2 text-[11px] text-amber-200">{filteredWorkshopGroups.length} equipo{filteredWorkshopGroups.length === 1 ? "" : "s"}</div>
                     </div>
                   </div>
@@ -1440,7 +1438,7 @@ export default function Home() {
                                 <div className="text-[11px] text-slate-500">{group.equipment?.description || "Equipo operativo"} · {group.rows.length} OT</div>
                               </div>
                             </div>
-                            {equipmentCycleFilter !== "FINALIZADOS" && <button
+                            {otCycleFilter !== "FINALIZADAS" && <button
                               type="button"
                               onClick={() => assignWorkOrdersMutation.mutate({ weekId: selectedWeekId!, guard, equipmentId: group.equipment!.id, workOrderIds: [] })}
                               disabled={assignWorkOrdersMutation.isPending || !selectedWeekId}
@@ -1464,10 +1462,10 @@ export default function Home() {
                                         <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
                                         <label title={row.workOrder.fotoRepuesto ? "Ver evidencia fotográfica" : "Evidencia no disponible"} className={`rounded-md p-1 ${row.workOrder.fotoRepuesto ? "text-emerald-300" : "text-slate-600"}`}>
                                           <Camera className="h-3.5 w-3.5" />
-                                          {equipmentCycleFilter !== "FINALIZADOS" && <input type="file" accept="image/*" capture="environment" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending || row.execution?.status === "CERRADA_NOTIFICADA"} />}
+                                          {otCycleFilter !== "FINALIZADAS" && <input type="file" accept="image/*" capture="environment" className="hidden" onChange={event => void handlePhotoChange(row.workOrder.id, event)} disabled={savePhotoMutation.isPending || row.execution?.status === "CERRADA_NOTIFICADA"} />}
                                         </label>
                                         {row.workOrder.fotoRepuesto && <button type="button" title="Ver evidencia fotográfica" aria-label={`Ver evidencia de OT ${row.workOrder.otNumber}`} onClick={() => setPhotoPreview({ otNumber: row.workOrder.otNumber, src: row.workOrder.fotoRepuesto! })} className="overflow-hidden rounded-md border border-emerald-300/25 bg-black/20 p-0.5 transition hover:border-emerald-200"><img src={row.workOrder.fotoRepuesto} alt={`Evidencia fotográfica de OT ${row.workOrder.otNumber}`} className="h-8 w-8 object-cover" /></button>}
-                                        {equipmentCycleFilter !== "FINALIZADOS" && row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
+                                        {otCycleFilter !== "FINALIZADAS" && row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
                                         <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
                                         {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Finalizada</span>}
@@ -1480,8 +1478,8 @@ export default function Home() {
                                       </div>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                                      {equipmentCycleFilter === "FINALIZADOS" && <button type="button" onClick={() => { setEditingRow(row); setHistoryOnly(true); setShowHistory(true); }} className="rounded-lg border border-blue-300/25 px-3 py-2 text-[11px] font-bold text-blue-200 transition hover:bg-blue-300/10"><History className="mr-1 inline h-3.5 w-3.5" />Historial</button>}
-                                      {equipmentCycleFilter !== "FINALIZADOS" && <>
+                                      {otCycleFilter === "FINALIZADAS" && <button type="button" onClick={() => { setEditingRow(row); setHistoryOnly(true); setShowHistory(true); }} className="rounded-lg border border-blue-300/25 px-3 py-2 text-[11px] font-bold text-blue-200 transition hover:bg-blue-300/10"><History className="mr-1 inline h-3.5 w-3.5" />Historial</button>}
+                                      {otCycleFilter !== "FINALIZADAS" && <>
                                       {requiresLogistics && (
                                         !canReviewReception(row.state?.status as Status | undefined) ? (
                                           <span className="rounded-xl border border-emerald-300/20 bg-emerald-300/[0.08] px-3 py-2 text-xs font-bold text-emerald-200">Revisada</span>
@@ -1512,7 +1510,7 @@ export default function Home() {
                           </div>
                         </article>
                       ))}
-                    {!visibleWorkshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">{equipmentCycleFilter === "FINALIZADOS" ? "No hay equipos finalizados en este ciclo." : "No hay equipos pendientes en el taller. Ingresa un equipo desde “OT y recepción”."}</div>}
+                    {!visibleWorkshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">{otCycleFilter === "FINALIZADAS" ? "No hay equipos finalizados en este ciclo." : "No hay equipos que coincidan con este filtro en el turno."}</div>}
                     {visibleWorkshopGroups.length > 0 && !filteredWorkshopGroups.length && <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay OT o equipos que coincidan con “{equipmentSearch}”.</div>}
                   </div>
                 </section>}
@@ -1524,8 +1522,7 @@ export default function Home() {
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                     <div>
                       <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
-                        <ClipboardCheck className="h-3.5 w-3.5" /> Estacionamiento
-                        de OTs
+                        <ClipboardCheck className="h-3.5 w-3.5" /> Plan semanal
                       </div>
                       <h2 className="mt-1 font-display text-2xl text-white">
                         {otTypeFilter === "CORRECTIVAS" ? "OT correctivas" : otTypeFilter === "PROGRAMADAS" ? "OT programadas" : "Todas las OT"} · Guardia {GUARD_LABEL[guard]}
@@ -1565,9 +1562,17 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
-                  {(statusFilter !== "TODOS" || executionFilter !== "TODAS" || warehouseFilter !== "TODOS" || search.trim()) && (
+                  <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.025] p-1 sm:grid-cols-5" role="tablist" aria-label="Filtro de estado de OT">
+                    {(["TODAS", "SIN_REVISAR", "PENDIENTES", "REVISADAS", "FINALIZADAS"] as OtCycleFilter[]).map(filter => (
+                      <button key={filter} type="button" role="tab" aria-selected={otCycleFilter === filter} onClick={() => setOtCycleFilter(filter)} className={`rounded-lg px-2 py-2 text-[10px] font-bold transition ${otCycleFilter === filter ? (filter === "FINALIZADAS" ? "bg-blue-300 text-[#071014]" : "bg-amber-300 text-[#071014]") : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}>
+                        {filter === "TODAS" ? "Todas" : filter === "SIN_REVISAR" ? "Sin revisar" : filter === "PENDIENTES" ? "Pendiente" : filter === "REVISADAS" ? "Revisado" : "Finalizado"} <span className="ml-1 opacity-70">{otCycleCounts[filter]}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {(otCycleFilter !== "TODAS" || statusFilter !== "TODOS" || executionFilter !== "TODAS" || warehouseFilter !== "TODOS" || search.trim()) && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-[11px] text-amber-100">
                       <span className="font-semibold">Filtro activo:</span>
+                      {otCycleFilter !== "TODAS" && <span className="rounded-md bg-white/[0.08] px-2 py-1">Ciclo: {otCycleFilter === "FINALIZADAS" ? "Finalizado" : otCycleFilter === "REVISADAS" ? "Revisado" : otCycleFilter === "PENDIENTES" ? "Pendiente" : "Sin revisar"}</span>}
                       {statusFilter !== "TODOS" && <span className="rounded-md bg-white/[0.08] px-2 py-1">Estado: {STATUS_META[statusFilter].label}</span>}
                       {executionFilter !== "TODAS" && <span className="rounded-md bg-white/[0.08] px-2 py-1">Ejecución: {executionFilter === "CERRADAS" ? "Finalizadas" : "Pendientes"}</span>}
                       {warehouseFilter !== "TODOS" && <span className="rounded-md bg-white/[0.08] px-2 py-1">Almacén: {warehouseFilter}</span>}

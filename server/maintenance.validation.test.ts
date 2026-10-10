@@ -10,6 +10,7 @@ import {
   hasReservation,
   isEquipmentCycleFinalized,
   isWorkOrderClosed,
+  matchesOtCycleFilter,
   isCorrectiveWorkOrder,
   validateReceptionInput,
 } from "@shared/maintenance";
@@ -103,6 +104,16 @@ describe("maintenance business rules", () => {
       "PARCIAL",
     ])).toBe(false);
     expect(isEquipmentCycleFinalized(["CERRADA_NOTIFICADA", "REVISADO"])).toBe(false);
+  });
+
+  it("classifies individual OTs for the five operational filters", () => {
+    expect(matchesOtCycleFilter({ hasReceptionState: false }, "SIN_REVISAR")).toBe(true);
+    expect(matchesOtCycleFilter({ receptionStatus: "PARCIAL", hasReceptionState: true }, "PENDIENTES")).toBe(true);
+    expect(matchesOtCycleFilter({ receptionStatus: "FALTA_RECIBIR", hasReceptionState: true }, "PENDIENTES")).toBe(true);
+    expect(matchesOtCycleFilter({ receptionStatus: "REVISADO", hasReceptionState: true }, "REVISADAS")).toBe(true);
+    expect(matchesOtCycleFilter({ receptionStatus: "REVISADO", executionStatus: "CERRADA_NOTIFICADA", hasReceptionState: true }, "REVISADAS")).toBe(false);
+    expect(matchesOtCycleFilter({ executionStatus: "CERRADA_NOTIFICADA" }, "FINALIZADAS")).toBe(true);
+    expect(matchesOtCycleFilter({ receptionStatus: "PARCIAL", executionStatus: "CERRADA_NOTIFICADA" }, "PENDIENTES")).toBe(false);
   });
 
   it("excludes closed OTs from a subsequent equipment re-entry", () => {
