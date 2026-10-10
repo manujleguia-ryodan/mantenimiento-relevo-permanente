@@ -54,7 +54,7 @@ import * as XLSX from "xlsx";
 import { toast } from "sonner";
 
 type Guard = "A" | "B" | "C" | "D";
-type Status = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RECIBIR";
+type Status = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RECIBIR" | "REVISADO";
 type AccessSession = { name: string; guard: Guard; role: "admin" | "facilitator" };
 
 const GUARDS: Guard[] = ["A", "B", "C", "D"];
@@ -82,6 +82,11 @@ const STATUS_META: Record<
     label: "Falta recibir",
     tone: "bg-rose-400/10 text-rose-300 border-rose-400/30",
     dot: "bg-rose-400",
+  },
+  REVISADO: {
+    label: "Revisado",
+    tone: "bg-violet-400/15 text-violet-200 border-violet-400/30",
+    dot: "bg-violet-300",
   },
 };
 
@@ -671,7 +676,7 @@ export default function Home() {
   const workshopGroups = useMemo(() => {
     const groups = new Map<string, { key: string; equipment: (typeof rows)[number]["equipment"]; rows: typeof rows }>();
     for (const row of rows) {
-      if (!row.equipment || row.equipment.activo_en_taller !== true || !assignedWorkOrderIds.has(row.workOrder.id)) continue;
+      if (!row.equipment || row.equipment.activo_en_taller !== true || !assignedWorkOrderIds.has(row.workOrder.id) || isWorkOrderClosed(row.execution?.status)) continue;
       const key = String(row.equipment.id);
       const existing = groups.get(key);
       if (existing) existing.rows.push(row);
@@ -1292,7 +1297,7 @@ export default function Home() {
                       </div>
                       <div className="w-full space-y-3">
                         {(
-                          ["RECIBIDA", "PARCIAL", "FALTA_RECIBIR"] as Status[]
+                          ["RECIBIDA", "PARCIAL", "FALTA_RECIBIR", "REVISADO"] as Status[]
                         ).map(status => (
                           <div
                             key={status}
@@ -2235,7 +2240,7 @@ export default function Home() {
                   Estado de recepción
                 </div>
                 <div className="grid gap-2 sm:grid-cols-3">
-                  {(["RECIBIDA", "PARCIAL", "FALTA_RECIBIR"] as Status[]).map(
+                  {(["RECIBIDA", "PARCIAL", "FALTA_RECIBIR", "REVISADO"] as Status[]).map(
                     status => (
                       <button
                         key={status}
@@ -2300,7 +2305,7 @@ export default function Home() {
                   onClick={submitReception}
                   disabled={
                     !isFacilitator || receptionMutation.isPending ||
-                    (statusDraft !== "RECIBIDA" && !warehouseCodesDraft.length)
+                    (statusDraft !== "RECIBIDA" && statusDraft !== "REVISADO" && !warehouseCodesDraft.length)
                   }
                   className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-bold text-[#0a0f10] disabled:cursor-not-allowed disabled:opacity-40"
                 >

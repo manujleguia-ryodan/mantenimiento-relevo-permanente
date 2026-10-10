@@ -69,6 +69,7 @@ const statusSchema = z.enum([
   "RECIBIDA",
   "PARCIAL",
   "FALTA_RECIBIR",
+  "REVISADO",
 ]);
 const managedRoleSchema = z.enum(["admin", "facilitator", "supervisor", "viewer"]);
 
@@ -773,21 +774,24 @@ export const appRouter = router({
           : [];
         if (selectedWarehouses.length !== warehouseCodes.length)
           throw new TRPCError({ code: "BAD_REQUEST", message: "Uno o más almacenes no están en el catálogo activo." });
-        const [existing] = await db.select().from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId))).limit(1);
-        if (existing && !canReviewReception(existing.status)) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Esta OT ya fue recibida/revisada y no se puede revisar nuevamente.",
-          });
-        }
-          const responsibleName = ctx.user?.name || ctx.user?.email || "Usuario actual";
+        const [existing] = await db.select().from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard))).limit(1);
+        const responsibleName = ctx.user?.name || ctx.user?.email || "Usuario actual";
         const newPendingWarehouse = warehouseCodes.join(", ") || null;
         let stateId: number;
         await db.transaction(async tx => {
-          const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null });
-          stateId = insertId(inserted);
-          if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
-          await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user?.id ?? null, actorName: ctx.user?.name || ctx.user?.email || "Usuario actual" });
+          if (existing) {
+            stateId = existing.id;
+            const previousPendingWarehouse = (await tx.select({ warehouseCodeSnapshot: otStatePendingWarehouses.warehouseCodeSnapshot }).from(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, existing.id))).map(item => item.warehouseCodeSnapshot).join(", ") || null;
+            await tx.update(otStates).set({ status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null }).where(eq(otStates.id, existing.id));
+            await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, existing.id));
+            if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: existing.id, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
+            await tx.insert(otHistory).values({ otStateId: existing.id, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: existing.status, newStatus: input.status, previousPendingWarehouse, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user?.id ?? null, actorName: responsibleName });
+          } else {
+            const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null });
+            stateId = insertId(inserted);
+            if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
+            await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user?.id ?? null, actorName: responsibleName });
+          }
         });
         return { success: true, stateId: stateId! };
       }),
@@ -847,8 +851,29 @@ export const appRouter = router({
           guard: input.guard,
           ...values,
         });
+        const [auditState] = await db.select({ id: otStates.id }).from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard))).limit(1);
+        if (auditState) {
+          await db.insert(otHistory).values({
+            otStateId: auditState.id,
+            workOrderId: input.workOrderId,
+            weekId: input.weekId,
+            guard: input.guard,
+            previousStatus: existing?.status ?? "ABIERTA",
+            newStatus: status,
+            previousPendingWarehouse: null,
+            newPendingWarehouse: null,
+            note: "Cambio de ejecución",
+            actorUserId: ctx.user?.id ?? null,
+            actorName: ctx.user?.name || ctx.user?.email || "Usuario actual",
+          });
+        }
         if (input.closed) {
           await db.update(workOrders).set({ fotoRepuesto: null }).where(eq(workOrders.id, input.workOrderId));
+          await db.delete(guardWorkOrderAssignments).where(and(
+            eq(guardWorkOrderAssignments.weekId, input.weekId),
+            eq(guardWorkOrderAssignments.guard, input.guard),
+            eq(guardWorkOrderAssignments.workOrderId, input.workOrderId),
+          ));
         }
         let equipmentDeactivated = false;
         if (input.closed) {
@@ -861,14 +886,17 @@ export const appRouter = router({
               .from(otExecutions)
               .where(and(eq(otExecutions.weekId, input.weekId), eq(otExecutions.guard, input.guard), inArray(otExecutions.workOrderId, relatedIds)))
             : [];
-          if (relatedOrders.length && relatedExecutions.length === relatedOrders.length && areAllWorkOrdersClosed(relatedExecutions.map(item => item.status))) {
-            await db.update(equipment).set({ activo_en_taller: false }).where(eq(equipment.id, workOrder.equipmentId));
-            await db.delete(guardAssignments).where(eq(guardAssignments.equipmentId, workOrder.equipmentId));
-            if (relatedIds.length) {
-              await db.delete(guardWorkOrderAssignments).where(inArray(guardWorkOrderAssignments.workOrderId, relatedIds));
+          const remainingAssignments = await db.select({ id: guardWorkOrderAssignments.id })
+            .from(guardWorkOrderAssignments)
+            .where(and(eq(guardWorkOrderAssignments.weekId, input.weekId), eq(guardWorkOrderAssignments.guard, input.guard), inArray(guardWorkOrderAssignments.workOrderId, relatedIds)));
+          if (!remainingAssignments.length) {
+            const assignmentsAnywhere = await db.select({ id: guardWorkOrderAssignments.id })
+              .from(guardWorkOrderAssignments)
+              .where(inArray(guardWorkOrderAssignments.workOrderId, relatedIds));
+            if (!assignmentsAnywhere.length) {
+              await db.update(equipment).set({ activo_en_taller: false }).where(eq(equipment.id, workOrder.equipmentId));
+              equipmentDeactivated = true;
             }
-            await db.delete(supervisorAssignments).where(eq(supervisorAssignments.equipmentId, workOrder.equipmentId));
-            equipmentDeactivated = true;
           }
         }
         return { success: true, status, equipmentDeactivated };

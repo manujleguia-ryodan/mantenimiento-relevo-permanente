@@ -117,7 +117,7 @@ export const supervisorAssignments = mysqlTable("supervisorAssignments", {
 export const otStates = mysqlTable("otStates", {
   id: int("id").autoincrement().primaryKey(), workOrderId: int("workOrderId").notNull(), weekId: int("weekId").notNull(),
   guard: mysqlEnum("guard", ["A", "B", "C", "D"]).notNull(),
-  status: mysqlEnum("status", ["SIN_REVISAR", "RECIBIDA", "PARCIAL", "FALTA_RECIBIR"]).default("SIN_REVISAR").notNull(),
+  status: mysqlEnum("status", ["SIN_REVISAR", "RECIBIDA", "PARCIAL", "FALTA_RECIBIR", "REVISADO"]).default("SIN_REVISAR").notNull(),
   pendingWarehouse1: boolean("pendingWarehouse1").default(false).notNull(), pendingWarehouse2: boolean("pendingWarehouse2").default(false).notNull(),
   inheritedFromHandoverId: int("inheritedFromHandoverId"), responsibleName: varchar("responsibleName", { length: 160 }), reviewedByRole: varchar("reviewedByRole", { length: 32 }),
   note: text("note"), updatedById: int("updatedById"), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

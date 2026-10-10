@@ -1,4 +1,4 @@
-export type ReceptionStatus = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RECIBIR";
+export type ReceptionStatus = "SIN_REVISAR" | "RECIBIDA" | "PARCIAL" | "FALTA_RECIBIR" | "REVISADO";
 
 export const WAREHOUSE_CODES = ["CENTRAL", "FERREYROS", "DONALDSON"] as const;
 export type WarehouseCode = string;
@@ -63,7 +63,7 @@ export function canPurgeSapRescheduledWorkOrder(input: {
 }
 
 export function canReviewReception(status?: ReceptionStatus | null) {
-  return !status || status === "SIN_REVISAR";
+  return true;
 }
 
 export function getPendingWarehouseLabel(codes: string[] | boolean | null | undefined, legacySecond?: boolean) {

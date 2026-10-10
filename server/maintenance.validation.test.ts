@@ -53,12 +53,13 @@ describe("maintenance business rules", () => {
     expect(hasReservation(null)).toBe(false);
   });
 
-  it("allows only the first reception review", () => {
+  it("allows repeated review of pending reception states", () => {
     expect(canReviewReception()).toBe(true);
     expect(canReviewReception("SIN_REVISAR")).toBe(true);
-    expect(canReviewReception("RECIBIDA")).toBe(false);
-    expect(canReviewReception("PARCIAL")).toBe(false);
-    expect(canReviewReception("FALTA_RECIBIR")).toBe(false);
+    expect(canReviewReception("RECIBIDA")).toBe(true);
+    expect(canReviewReception("PARCIAL")).toBe(true);
+    expect(canReviewReception("FALTA_RECIBIR")).toBe(true);
+    expect(canReviewReception("REVISADO")).toBe(true);
   });
 
   it("separates corrective work orders from scheduled work orders", () => {
