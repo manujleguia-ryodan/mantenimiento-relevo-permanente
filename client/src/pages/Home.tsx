@@ -950,6 +950,14 @@ export default function Home() {
     setMobileMenuOpen(false);
   }
 
+  function resetOtFilters() {
+    setSearch("");
+    setStatusFilter("TODOS");
+    setExecutionFilter("TODAS");
+    setWarehouseFilter("TODOS");
+    setOtTypeFilter("TODAS");
+  }
+
   if (!session) {
     return (
       <div className="grid min-h-screen place-items-center bg-[#0a0f10] px-4 text-slate-200">
@@ -1068,7 +1076,7 @@ export default function Home() {
             ].filter(item => item.id !== "relevo" || isFacilitator).map(item => (
               <button
                 key={item.id}
-                onClick={() => scrollTo(item.id)}
+                onClick={() => { if (item.id === "ot") resetOtFilters(); scrollTo(item.id); }}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""} ${activeSection === item.id ? "bg-amber-300/10 font-semibold text-amber-200" : "text-slate-400 hover:bg-white/[0.04] hover:text-white"}`}
               >
                 <item.icon className="h-4 w-4" />
@@ -1525,6 +1533,16 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+                  {(statusFilter !== "TODOS" || executionFilter !== "TODAS" || warehouseFilter !== "TODOS" || search.trim()) && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-[11px] text-amber-100">
+                      <span className="font-semibold">Filtro activo:</span>
+                      {statusFilter !== "TODOS" && <span className="rounded-md bg-white/[0.08] px-2 py-1">Estado: {STATUS_META[statusFilter].label}</span>}
+                      {executionFilter !== "TODAS" && <span className="rounded-md bg-white/[0.08] px-2 py-1">Ejecución: {executionFilter === "CERRADAS" ? "Finalizadas" : "Pendientes"}</span>}
+                      {warehouseFilter !== "TODOS" && <span className="rounded-md bg-white/[0.08] px-2 py-1">Almacén: {warehouseFilter}</span>}
+                      {search.trim() && <span className="rounded-md bg-white/[0.08] px-2 py-1">Búsqueda: {search.trim()}</span>}
+                      <button type="button" onClick={resetOtFilters} className="ml-auto rounded-md border border-amber-300/30 px-2.5 py-1.5 font-bold text-amber-200 transition hover:bg-amber-300/10">Mostrar todas las OT</button>
+                    </div>
+                  )}
                   <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                     <span className="text-slate-400">Estados visuales:</span>
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Recibida</span>

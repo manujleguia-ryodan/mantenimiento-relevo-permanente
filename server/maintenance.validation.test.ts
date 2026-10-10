@@ -62,6 +62,12 @@ describe("maintenance business rules", () => {
     expect(canReviewReception("REVISADO")).toBe(true);
   });
 
+  it("does not treat pending reception states as closed", () => {
+    expect(isWorkOrderClosed("PARCIAL")).toBe(false);
+    expect(isWorkOrderClosed("FALTA_RECIBIR")).toBe(false);
+    expect(isWorkOrderClosed("CERRADA_NOTIFICADA")).toBe(true);
+  });
+
   it("separates corrective work orders from scheduled work orders", () => {
     expect(isCorrectiveWorkOrder('{"Tipo":"Correctiva"}')).toBe(true);
     expect(isCorrectiveWorkOrder('{"Tipo":"Programada"}')).toBe(false);
