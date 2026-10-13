@@ -74,14 +74,11 @@ export async function getDashboardData(
   const visibleRows = rows;
   const visibleWorkOrderIds = visibleRows.map(row => row.workOrder.id);
   const allStates = visibleWorkOrderIds.length
-    ? await db.select().from(otStates).where(and(eq(otStates.weekId, weekId), inArray(otStates.workOrderId, visibleWorkOrderIds)))
+    ? await db.select().from(otStates).where(and(eq(otStates.weekId, weekId), inArray(otStates.workOrderId, visibleWorkOrderIds))).orderBy(desc(otStates.updatedAt), desc(otStates.id))
     : [];
   const latestStateByWorkOrder = new Map<number, (typeof allStates)[number]>();
   for (const candidate of allStates) {
-    const current = latestStateByWorkOrder.get(candidate.workOrderId);
-    if (!current || new Date(candidate.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) {
-      latestStateByWorkOrder.set(candidate.workOrderId, candidate);
-    }
+    if (!latestStateByWorkOrder.has(candidate.workOrderId)) latestStateByWorkOrder.set(candidate.workOrderId, candidate);
   }
   const sharedStateRows = visibleRows.map(row => ({
     ...row,
