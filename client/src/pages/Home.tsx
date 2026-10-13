@@ -1586,7 +1586,7 @@ export default function Home() {
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-400" /> Parcial / pendiente</span>
                     <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Finalizada</span>
                   </div>
-                  <div className="mt-3 max-h-[calc(100vh-340px)] min-h-[240px] max-w-full overflow-y-auto rounded-xl border border-white/[0.06]">
+                  <div className="mt-3 max-h-[calc(100vh-340px)] min-h-[240px] max-w-full overflow-auto rounded-xl border border-white/[0.06]">
                     <div className="space-y-3 p-2 md:hidden">
                       {groupedRows.map(group => (
                         <article key={group.key} className="overflow-hidden rounded-xl border border-amber-300/15 bg-amber-300/[0.035]">
@@ -1618,19 +1618,29 @@ export default function Home() {
                         </article>
                       ))}
                     </div>
-                    <table className="hidden w-full table-fixed text-left md:table">
+                    <table className="hidden min-w-[1120px] table-fixed text-left md:table">
+                      <colgroup>
+                        <col className="w-[110px]" />
+                        <col className="w-[105px]" />
+                        {excelColumns.map((column, index) => (
+                          <col key={column} className={index === excelColumns.length - 1 ? "w-[300px]" : "w-[150px]"} />
+                        ))}
+                        <col className="w-[135px]" />
+                        <col className="w-[190px]" />
+                        <col className="w-[135px]" />
+                      </colgroup>
                       <thead className="sticky top-0 z-10 bg-[#162022] text-[10px] uppercase tracking-[0.15em] text-slate-600">
                         <tr>
-                          <th className="break-words px-2 py-2 font-bold">
+                          <th className="whitespace-nowrap px-3 py-2 font-bold">
                             OT
                           </th>
-                          <th className="break-words px-2 py-2 font-bold">
+                          <th className="whitespace-nowrap px-3 py-2 font-bold">
                             Equipo
                           </th>
                           {excelColumns.map(column => (
                             <th
                               key={column}
-                              className="break-words px-2 py-2 font-bold"
+                              className="px-3 py-2 font-bold"
                             >
                               {normalizeExcelHeader(column).includes("reserva")
                                 ? "Reserva"
@@ -1639,13 +1649,13 @@ export default function Home() {
                                   : column}
                             </th>
                           ))}
-                          <th className="break-words px-2 py-2 font-bold">
+                          <th className="whitespace-nowrap px-3 py-2 font-bold">
                             Recepción
                           </th>
-                          <th className="break-words px-2 py-2 font-bold">
+                          <th className="whitespace-nowrap px-3 py-2 font-bold">
                             Responsable / cierre
                           </th>
-                          <th className="break-words px-2 py-2 font-bold">
+                          <th className="whitespace-nowrap px-3 py-2 font-bold">
                             Actualizado
                           </th>
                         </tr>
