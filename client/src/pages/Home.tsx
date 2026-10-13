@@ -1418,7 +1418,9 @@ export default function Home() {
                       <p className="mt-1 text-xs text-slate-500">Trabajo del turno actual. Busca por OT o Equipo.</p>
                     </div>
                     <div className="flex w-full flex-col gap-2 xl:w-auto xl:flex-row xl:flex-wrap xl:items-center">
-                      <div className="grid w-full grid-cols-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 xl:w-auto" role="tablist" aria-label="Tipo de OT del turno">
+                      <div className="w-full xl:w-auto">
+                        <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-[0.14em] text-emerald-300/70">Tipo de OT</div>
+                        <div className="grid w-full grid-cols-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 xl:w-auto" role="tablist" aria-label="Tipo de OT del turno">
                         {([
                           ["TODAS", "Todas"],
                           ["PROGRAMADAS", "Programadas"],
@@ -1435,13 +1437,17 @@ export default function Home() {
                             {label}
                           </button>
                         ))}
+                        </div>
                       </div>
-                      <div className="grid w-full grid-cols-5 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 xl:w-auto" role="tablist" aria-label="Filtro de OTs del turno">
+                      <div className="w-full xl:w-auto">
+                        <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-[0.14em] text-amber-300/70">Estado de OT</div>
+                        <div className="grid w-full grid-cols-5 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 xl:w-auto" role="tablist" aria-label="Filtro de OTs del turno">
                         {(["TODAS", "SIN_REVISAR", "PENDIENTES", "REVISADAS", "FINALIZADAS"] as OtCycleFilter[]).map(filter => (
                           <button key={filter} type="button" role="tab" aria-selected={otCycleFilter === filter} onClick={() => setOtCycleFilter(filter)} className={`rounded-md px-1.5 py-1.5 text-[9px] font-bold transition ${otCycleFilter === filter ? (filter === "FINALIZADAS" ? "bg-blue-300 text-[#071014]" : "bg-amber-300 text-[#071014]") : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}>
                             {filter === "TODAS" ? "Todas" : filter === "SIN_REVISAR" ? "Sin revisar" : filter === "PENDIENTES" ? "Pendiente" : filter === "REVISADAS" ? "Revisado" : "Finalizado"}
                           </button>
                         ))}
+                        </div>
                       </div>
                       <div className="relative min-w-0 w-full xl:w-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-600" /><input value={equipmentSearch} onChange={event => setEquipmentSearch(event.target.value)} placeholder="Buscar OT o equipo" aria-label="Buscar en equipos del turno" className="h-9 w-full rounded-lg border border-emerald-300/20 bg-white/[0.035] pl-8 pr-2 text-xs text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/50" /></div>
                       <div className="w-full whitespace-nowrap rounded-lg border border-amber-300/20 bg-amber-300/10 px-2.5 py-2 text-center text-[11px] text-amber-200 xl:w-auto">{filteredWorkshopGroups.length} equipo{filteredWorkshopGroups.length === 1 ? "" : "s"}</div>
