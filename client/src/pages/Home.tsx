@@ -273,6 +273,7 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<Status | "TODOS">("TODOS");
   const [executionFilter, setExecutionFilter] = useState<"TODAS" | "PENDIENTES" | "CERRADAS">("TODAS");
   const [otTypeFilter, setOtTypeFilter] = useState<"PROGRAMADAS" | "CORRECTIVAS" | "TODAS">("TODAS");
+  const [workshopTypeFilter, setWorkshopTypeFilter] = useState<"PROGRAMADAS" | "CORRECTIVAS" | "TODAS">("TODAS");
   const [otCycleFilter, setOtCycleFilter] = useState<OtCycleFilter>("TODAS");
   const [warehouseFilter, setWarehouseFilter] = useState("TODOS");
   const [activeSection, setActiveSection] = useState("panel");
@@ -681,17 +682,19 @@ export default function Home() {
     for (const row of rows) {
       const isAssignedToTurn = assignedWorkOrderIds.has(row.workOrder.id);
       const isHistoricalForTurn = isWorkOrderClosed(row.execution?.status);
+      const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
       const belongsToFilter = otCycleFilter === "FINALIZADAS"
         ? isHistoricalForTurn
         : isAssignedToTurn && !isHistoricalForTurn;
-      if (!row.equipment || !belongsToFilter || !matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) }, otCycleFilter)) continue;
+      const matchesWorkshopType = workshopTypeFilter === "TODAS" || (workshopTypeFilter === "CORRECTIVAS" ? isCorrective : !isCorrective);
+      if (!row.equipment || !belongsToFilter || !matchesWorkshopType || !matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) }, otCycleFilter)) continue;
       const key = String(row.equipment.id);
       const existing = groups.get(key);
       if (existing) existing.rows.push(row);
       else groups.set(key, { key, equipment: row.equipment, rows: [row] });
     }
     return Array.from(groups.values());
-  }, [rows, assignedWorkOrderIds, otCycleFilter]);
+  }, [rows, assignedWorkOrderIds, otCycleFilter, workshopTypeFilter]);
   const visibleWorkshopGroups = workshopGroups;
   const filteredWorkshopGroups = useMemo(() => {
     const query = equipmentSearch.trim().toLowerCase();
@@ -1415,6 +1418,24 @@ export default function Home() {
                       <p className="mt-1 text-xs text-slate-500">Trabajo del turno actual. Busca por OT o Equipo.</p>
                     </div>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                      <div className="grid grid-cols-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Tipo de OT del turno">
+                        {([
+                          ["TODAS", "Todas"],
+                          ["PROGRAMADAS", "Programadas"],
+                          ["CORRECTIVAS", "Correctivas"],
+                        ] as const).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="tab"
+                            aria-selected={workshopTypeFilter === value}
+                            onClick={() => setWorkshopTypeFilter(value)}
+                            className={`rounded-md px-2 py-1.5 text-[9px] font-bold transition ${workshopTypeFilter === value ? "bg-emerald-300 text-[#071014]" : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                       <div className="grid grid-cols-5 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Filtro de OTs del turno">
                         {(["TODAS", "SIN_REVISAR", "PENDIENTES", "REVISADAS", "FINALIZADAS"] as OtCycleFilter[]).map(filter => (
                           <button key={filter} type="button" role="tab" aria-selected={otCycleFilter === filter} onClick={() => setOtCycleFilter(filter)} className={`rounded-md px-1.5 py-1.5 text-[9px] font-bold transition ${otCycleFilter === filter ? (filter === "FINALIZADAS" ? "bg-blue-300 text-[#071014]" : "bg-amber-300 text-[#071014]") : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}>
