@@ -1260,6 +1260,7 @@ export default function Home() {
               </div>
             ) : (
               <>
+                {activeSection === "panel" && <>
                 <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                   <KpiCard
                     label="OT con reserva"
@@ -1413,6 +1414,7 @@ export default function Home() {
                     </div>
                   </div>
                 </section>
+                </>}
 
                 {activeSection === "equipos" && <section
                   id="equipos"
