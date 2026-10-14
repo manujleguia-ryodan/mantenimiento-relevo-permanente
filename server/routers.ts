@@ -39,7 +39,6 @@ import { ENV } from "./_core/env";
 import {
   areAllWorkOrdersClosed,
   canPurgeSapRescheduledWorkOrder,
-  canReviewReception,
   hasReservation,
   isWorkOrderClosed,
   validateReceptionInput,

@@ -6,7 +6,7 @@ import {
   type ExcelImportInvalidRow,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { canReviewReception, filterActiveWorkshopEquipment, getReservationValue, hasReservation, isCorrectiveWorkOrder, isWorkOrderClosed, matchesOtCycleFilter, type OtCycleFilter } from "@shared/maintenance";
+import { filterActiveWorkshopEquipment, getReceptionAction, getReservationValue, hasReservation, isCorrectiveWorkOrder, isWorkOrderClosed, matchesOtCycleFilter, type OtCycleFilter } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -1491,6 +1491,7 @@ export default function Home() {
                               const requiresLogistics = row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
                               const description = row.workOrder.description || fields["Descripción de operación"] || fields.Descripcion || "Sin descripción";
                               const isFinalized = row.execution?.status === "CERRADA_NOTIFICADA";
+                              const receptionAction = getReceptionAction(state);
                               return (
                                 <div key={row.workOrder.id} className={`border-l-4 p-3 ${statusRowTone(state, isFinalized)}`}>
                                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -1517,12 +1518,14 @@ export default function Home() {
                                     <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                                       {otCycleFilter === "FINALIZADAS" && <button type="button" onClick={() => { setEditingRow(row); setHistoryOnly(true); setShowHistory(true); }} className="rounded-lg border border-blue-300/25 px-3 py-2 text-[11px] font-bold text-blue-200 transition hover:bg-blue-300/10"><History className="mr-1 inline h-3.5 w-3.5" />Historial</button>}
                                       {otCycleFilter !== "FINALIZADAS" && <>
-                                      {requiresLogistics && (
-                                        !canReviewReception(row.state?.status as Status | undefined) ? (
-                                          <span className="rounded-xl border border-emerald-300/20 bg-emerald-300/[0.08] px-3 py-2 text-xs font-bold text-emerald-200">Revisada</span>
-                                        ) : (
-                                          <button type="button" onClick={() => openEdit(row)} className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-300/20">Revisar recepción</button>
-                                        )
+                                      {requiresLogistics && receptionAction === "COMPLETED" && (
+                                        <span className="rounded-xl border border-violet-300/25 bg-violet-300/[0.08] px-3 py-2 text-xs font-bold text-violet-200">Revisión completada</span>
+                                      )}
+                                      {requiresLogistics && receptionAction === "RESOLVE_DIFFERENCES" && (
+                                        <button type="button" onClick={() => openEdit(row)} className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-3.5 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-300/20">Resolver diferencias</button>
+                                      )}
+                                      {requiresLogistics && receptionAction === "REVIEW" && (
+                                        <button type="button" onClick={() => openEdit(row)} className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-300/20">Revisar recepción</button>
                                       )}
                                       {selectedWeekId && (
                                         <button

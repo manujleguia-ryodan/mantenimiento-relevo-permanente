@@ -5,6 +5,7 @@ import {
   canPurgeSapRescheduledWorkOrder,
   canReviewReception,
   filterActiveWorkshopEquipment,
+  getReceptionAction,
   getPendingWarehouseLabel,
   getReservationValue,
   hasReservation,
@@ -62,6 +63,14 @@ describe("maintenance business rules", () => {
     expect(canReviewReception("PARCIAL")).toBe(true);
     expect(canReviewReception("FALTA_RECIBIR")).toBe(true);
     expect(canReviewReception("REVISADO")).toBe(true);
+  });
+
+  it("shows only the correct reception action for each OT state", () => {
+    expect(getReceptionAction("SIN_REVISAR")).toBe("REVIEW");
+    expect(getReceptionAction("RECIBIDA")).toBe("REVIEW");
+    expect(getReceptionAction("REVISADO")).toBe("COMPLETED");
+    expect(getReceptionAction("PARCIAL")).toBe("RESOLVE_DIFFERENCES");
+    expect(getReceptionAction("FALTA_RECIBIR")).toBe("RESOLVE_DIFFERENCES");
   });
 
   it("does not treat pending reception states as closed", () => {
