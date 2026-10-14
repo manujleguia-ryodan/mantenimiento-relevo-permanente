@@ -66,7 +66,7 @@ export function matchesOtCycleFilter(input: { receptionStatus?: string | null; e
   if (finalized) return false;
   if (filter === "SIN_REVISAR") return !input.hasReceptionState || !input.receptionStatus || input.receptionStatus === "SIN_REVISAR";
   if (filter === "PENDIENTES") return input.receptionStatus === "PARCIAL" || input.receptionStatus === "FALTA_RECIBIR";
-  return input.receptionStatus === "REVISADO";
+  return input.receptionStatus === "RECIBIDA" || input.receptionStatus === "REVISADO";
 }
 
 export function canPurgeSapRescheduledWorkOrder(input: {

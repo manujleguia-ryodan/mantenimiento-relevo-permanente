@@ -211,6 +211,15 @@ function StatusPill({ status }: { status: Status }) {
   );
 }
 
+function statusRowTone(status: Status, finalized: boolean) {
+  if (finalized) return "border-l-blue-400 bg-blue-400/[0.06]";
+  if (status === "RECIBIDA") return "border-l-emerald-400 bg-emerald-400/[0.055]";
+  if (status === "PARCIAL") return "border-l-amber-400 bg-amber-400/[0.06]";
+  if (status === "FALTA_RECIBIR") return "border-l-rose-400 bg-rose-400/[0.06]";
+  if (status === "REVISADO") return "border-l-violet-400 bg-violet-400/[0.06]";
+  return "border-l-slate-400 bg-slate-400/[0.035]";
+}
+
 function KpiCard({
   label,
   value,
@@ -1481,8 +1490,9 @@ export default function Home() {
                               const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
                               const requiresLogistics = row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
                               const description = row.workOrder.description || fields["Descripción de operación"] || fields.Descripcion || "Sin descripción";
+                              const isFinalized = row.execution?.status === "CERRADA_NOTIFICADA";
                               return (
-                                <div key={row.workOrder.id} className="p-3">
+                                <div key={row.workOrder.id} className={`border-l-4 p-3 ${statusRowTone(state, isFinalized)}`}>
                                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                                     <div className="min-w-0 flex-1">
                                       <div className="flex flex-wrap items-center gap-2">

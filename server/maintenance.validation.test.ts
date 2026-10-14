@@ -110,6 +110,7 @@ describe("maintenance business rules", () => {
     expect(matchesOtCycleFilter({ hasReceptionState: false }, "SIN_REVISAR")).toBe(true);
     expect(matchesOtCycleFilter({ receptionStatus: "PARCIAL", hasReceptionState: true }, "PENDIENTES")).toBe(true);
     expect(matchesOtCycleFilter({ receptionStatus: "FALTA_RECIBIR", hasReceptionState: true }, "PENDIENTES")).toBe(true);
+    expect(matchesOtCycleFilter({ receptionStatus: "RECIBIDA", hasReceptionState: true }, "REVISADAS")).toBe(true);
     expect(matchesOtCycleFilter({ receptionStatus: "REVISADO", hasReceptionState: true }, "REVISADAS")).toBe(true);
     expect(matchesOtCycleFilter({ receptionStatus: "REVISADO", executionStatus: "CERRADA_NOTIFICADA", hasReceptionState: true }, "REVISADAS")).toBe(false);
     expect(matchesOtCycleFilter({ executionStatus: "CERRADA_NOTIFICADA" }, "FINALIZADAS")).toBe(true);
