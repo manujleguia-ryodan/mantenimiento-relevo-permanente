@@ -319,6 +319,7 @@ export default function Home() {
   const [equipmentSearch, setEquipmentSearch] = useState("");
   const [assignmentModal, setAssignmentModal] = useState<{ equipmentId: number; equipmentCode: string; rows: any[] } | null>(null);
   const [assignmentDraftIds, setAssignmentDraftIds] = useState<number[]>([]);
+  const [selectedCloseIds, setSelectedCloseIds] = useState<number[]>([]);
   const [photoPreview, setPhotoPreview] = useState<{ otNumber: string; src: string } | null>(null);
   const [relationsDraft, setRelationsDraft] = useState<
     Record<Guard, Guard | "">
@@ -426,7 +427,7 @@ export default function Home() {
     onSuccess: async result => {
       toast.success(result.updated ? "OT correctiva existente actualizada y visible en el panel." : "OT correctiva creada y visible en el panel.");
       setShowCorrectiveOt(false);
-      setOtTypeFilter("CORRECTIVAS");
+      setOtTypeFilter("PROGRAMADAS");
       setCorrectiveOtNumber("");
       setCorrectiveEquipment("");
       setCorrectiveReservation("");
@@ -440,7 +441,7 @@ export default function Home() {
       toast.success(`${result.created} OT correctivas creadas${result.updated ? ` · ${result.updated} OT existentes actualizadas` : ""}.`);
       setShowCorrectiveOt(false);
       setBulkCorrectiveMode(false);
-      setOtTypeFilter("CORRECTIVAS");
+      setOtTypeFilter("PROGRAMADAS");
       setBulkCorrectiveText("");
       setBulkCorrectivePreview({ rows: [], invalid: [] });
       await utils.maintenance.dashboard.invalidate();
@@ -665,12 +666,10 @@ export default function Home() {
         executionFilter === "TODAS" ||
         (executionFilter === "CERRADAS" && row.execution?.status === "CERRADA_NOTIFICADA") ||
         (executionFilter === "PENDIENTES" && row.execution?.status !== "CERRADA_NOTIFICADA");
-      const matchesCycle = matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) }, otCycleFilter);
       const isCorrective = isCorrectiveWorkOrder(row.workOrder.sourceData);
-      const matchesOtType =
-        otTypeFilter === "TODAS" ||
-        (otTypeFilter === "CORRECTIVAS" && isCorrective) ||
-        (otTypeFilter === "PROGRAMADAS" && !isCorrective);
+      const matchesCycle = matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state), isCorrective }, otCycleFilter);
+      if (isCorrective) return false;
+      const matchesOtType = otTypeFilter !== "CORRECTIVAS";
       return matchesSearch && matchesStatus && matchesWarehouse && matchesExecution && matchesOtType && matchesCycle;
     });
   }, [rows, search, statusFilter, warehouseFilter, executionFilter, otTypeFilter, otCycleFilter, assignedWorkOrderIds]);
@@ -696,7 +695,7 @@ export default function Home() {
         ? isHistoricalForTurn
         : isAssignedToTurn && !isHistoricalForTurn;
       const matchesWorkshopType = workshopTypeFilter === "TODAS" || (workshopTypeFilter === "CORRECTIVAS" ? isCorrective : !isCorrective);
-      if (!row.equipment || !belongsToFilter || !matchesWorkshopType || !matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) }, otCycleFilter)) continue;
+      if (!row.equipment || !belongsToFilter || !matchesWorkshopType || !matchesOtCycleFilter({ receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state), isCorrective }, otCycleFilter)) continue;
       const key = String(row.equipment.id);
       const existing = groups.get(key);
       if (existing) existing.rows.push(row);
@@ -718,6 +717,8 @@ export default function Home() {
       return matchingRows.length ? [{ ...group, rows: matchingRows }] : [];
     });
   }, [visibleWorkshopGroups, equipmentSearch]);
+  const visibleWorkshopRows = useMemo(() => filteredWorkshopGroups.flatMap(group => group.rows), [filteredWorkshopGroups]);
+  const eligibleWorkshopRows = useMemo(() => visibleWorkshopRows.filter(canCloseSelectedRow), [visibleWorkshopRows]);
 
   const otTypeCounts = useMemo(() => rows.reduce(
     (counts, row) => {
@@ -729,7 +730,7 @@ export default function Home() {
     { programadas: 0, correctivas: 0 }
   ), [rows]);
   const otCycleCounts = useMemo(() => rows.reduce((counts, row) => {
-    const filterInput = { receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state) };
+    const filterInput = { receptionStatus: row.state?.status, executionStatus: row.execution?.status, hasReceptionState: Boolean(row.state), isCorrective: isCorrectiveWorkOrder(row.workOrder.sourceData) };
     if (matchesOtCycleFilter(filterInput, "FINALIZADAS")) counts.FINALIZADAS += 1;
     else if (matchesOtCycleFilter(filterInput, "SIN_REVISAR")) counts.SIN_REVISAR += 1;
     else if (matchesOtCycleFilter(filterInput, "PENDIENTES")) counts.PENDIENTES += 1;
@@ -776,6 +777,36 @@ export default function Home() {
     setResponsibleDraft(operatorName);
     setNoteDraft(row.state?.note ?? "");
     setShowHistory(false);
+  }
+
+  function canCloseSelectedRow(row: any) {
+    if (isWorkOrderClosed(row.execution?.status)) return false;
+    return isCorrectiveWorkOrder(row.workOrder.sourceData) || row.state?.status === "REVISADO";
+  }
+
+  async function closeSelectedWorkOrders(rowsToClose: any[]) {
+    const eligible = rowsToClose.filter(canCloseSelectedRow);
+    const excluded = rowsToClose.filter(row => !canCloseSelectedRow(row));
+    if (!eligible.length) {
+      toast.error("No hay OTs elegibles para cerrar. Las programadas deben estar revisadas.");
+      return;
+    }
+    const summary = eligible.map(row => `OT ${row.workOrder.otNumber} · ${row.equipment?.code ?? "Sin equipo"}`).join("\n");
+    const excludedText = excluded.length ? `\n\nExcluidas: ${excluded.length} OT por no cumplir las condiciones actuales.` : "";
+    if (!window.confirm(`Se cerrarán ${eligible.length} OT seleccionadas:\n\n${summary}${excludedText}\n\n¿Confirmas el cierre?`)) return;
+    let closed = 0;
+    let failed = 0;
+    for (const row of eligible) {
+      try {
+        await executionMutation.mutateAsync({ workOrderId: row.workOrder.id, weekId: selectedWeekId!, guard, closed: true });
+        closed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setSelectedCloseIds([]);
+    if (failed) toast.error(`${closed} OT cerradas; ${failed} no pudieron cerrarse.`);
+    else toast.success(`${closed} OT cerradas correctamente.`);
   }
 
   function openCorrectiveEditor(row: any) {
@@ -1464,6 +1495,19 @@ export default function Home() {
                       <div className="w-full whitespace-nowrap rounded-lg border border-amber-300/20 bg-amber-300/10 px-2.5 py-2 text-center text-[11px] text-amber-200 xl:w-auto">{filteredWorkshopGroups.length} equipo{filteredWorkshopGroups.length === 1 ? "" : "s"}</div>
                     </div>
                   </div>
+                  {otCycleFilter !== "FINALIZADAS" && (
+                    <div className="mt-3 flex flex-col gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] p-2.5 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-[11px] text-slate-400">
+                        <b className="text-white">{selectedCloseIds.length}</b> OT seleccionadas
+                        {visibleWorkshopRows.length - eligibleWorkshopRows.length > 0 && <span className="ml-2 text-slate-600">· {visibleWorkshopRows.length - eligibleWorkshopRows.length} no elegibles</span>}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setSelectedCloseIds(eligibleWorkshopRows.map(row => row.workOrder.id))} disabled={!eligibleWorkshopRows.length} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold text-slate-300 hover:bg-white/5 disabled:opacity-40">Seleccionar OTs elegibles</button>
+                        <button type="button" onClick={() => void closeSelectedWorkOrders(visibleWorkshopRows.filter(row => selectedCloseIds.includes(row.workOrder.id)))} disabled={!selectedCloseIds.length || executionMutation.isPending} className="rounded-lg bg-emerald-300 px-2.5 py-1.5 text-[10px] font-bold text-[#071014] disabled:opacity-40">Cerrar seleccionadas</button>
+                        {selectedCloseIds.length > 0 && <button type="button" onClick={() => setSelectedCloseIds([])} className="rounded-lg border border-rose-300/20 px-2.5 py-1.5 text-[10px] font-bold text-rose-200 hover:bg-rose-300/10">Limpiar</button>}
+                      </div>
+                    </div>
+                  )}
                   <div className="mt-3 space-y-2">
                     {filteredWorkshopGroups
                       .map(group => (
@@ -1499,6 +1543,7 @@ export default function Home() {
                                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                                     <div className="min-w-0 flex-1">
                                       <div className="flex flex-wrap items-center gap-2">
+                                        {otCycleFilter !== "FINALIZADAS" && <input type="checkbox" aria-label={`Seleccionar OT ${row.workOrder.otNumber} para cierre`} checked={selectedCloseIds.includes(row.workOrder.id)} disabled={!canCloseSelectedRow(row) || executionMutation.isPending} onChange={event => setSelectedCloseIds(current => event.target.checked ? (current.includes(row.workOrder.id) ? current : [...current, row.workOrder.id]) : current.filter(id => id !== row.workOrder.id))} className="h-4 w-4 shrink-0 accent-emerald-300 disabled:opacity-30" />}
                                         <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
                                         <label title={row.workOrder.fotoRepuesto ? "Ver evidencia fotográfica" : "Evidencia no disponible"} className={`rounded-md p-1 ${row.workOrder.fotoRepuesto ? "text-emerald-300" : "text-slate-600"}`}>
                                           <Camera className="h-3.5 w-3.5" />
@@ -1520,22 +1565,22 @@ export default function Home() {
                                     <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                                       {otCycleFilter === "FINALIZADAS" && <button type="button" onClick={() => { setEditingRow(row); setHistoryOnly(true); setShowHistory(true); }} className="rounded-lg border border-blue-300/25 px-3 py-2 text-[11px] font-bold text-blue-200 transition hover:bg-blue-300/10"><History className="mr-1 inline h-3.5 w-3.5" />Historial</button>}
                                       {otCycleFilter !== "FINALIZADAS" && <>
-                                      {requiresLogistics && receptionAction === "COMPLETED" && (
+                                      {!isCorrective && requiresLogistics && receptionAction === "COMPLETED" && (
                                         <span className="rounded-xl border border-violet-300/25 bg-violet-300/[0.08] px-3 py-2 text-xs font-bold text-violet-200">Revisión completada</span>
                                       )}
-                                      {requiresLogistics && receptionAction === "RESOLVE_DIFFERENCES" && (
+                                      {!isCorrective && requiresLogistics && receptionAction === "RESOLVE_DIFFERENCES" && (
                                         <button type="button" onClick={() => openEdit(row)} className="rounded-xl border border-rose-300/30 bg-rose-300/10 px-3.5 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-300/20">Resolver diferencias</button>
                                       )}
-                                      {requiresLogistics && receptionAction === "REVIEW" && (
+                                      {!isCorrective && requiresLogistics && receptionAction === "REVIEW" && (
                                         <button type="button" onClick={() => openEdit(row)} className="rounded-xl border border-amber-300/35 bg-amber-300/10 px-3.5 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-300/20">Revisar recepción</button>
                                       )}
-                                      {selectedWeekId && (
+                                      {selectedWeekId && !isWorkOrderClosed(row.execution?.status) && (
                                         <button
                                           type="button"
-                                          onClick={() => executionMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, guard, closed: row.execution?.status !== "CERRADA_NOTIFICADA" })}
-                                          disabled={executionMutation.isPending}
-                                          className={`rounded-lg border px-3 py-2 text-[11px] font-bold transition disabled:opacity-40 ${row.execution?.status === "CERRADA_NOTIFICADA" ? "border-blue-300/25 text-blue-200 hover:bg-blue-300/10" : "border-emerald-300/25 text-emerald-200 hover:bg-emerald-300/10"}`}
-                                        >{row.execution?.status === "CERRADA_NOTIFICADA" ? "Reabrir OT" : "Cerrar OT"}</button>
+                                          onClick={() => executionMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, guard, closed: true })}
+                                          disabled={executionMutation.isPending || !canCloseSelectedRow(row)}
+                                          className={`rounded-lg border px-3 py-2 text-[11px] font-bold transition disabled:opacity-40 ${canCloseSelectedRow(row) ? "border-emerald-300/25 text-emerald-200 hover:bg-emerald-300/10" : "border-white/10 text-slate-500"}`}
+                                        >{canCloseSelectedRow(row) ? "Cerrar OT" : "Requiere revisión"}</button>
                                       )}
                                       {isCorrective && (
                                         <>
@@ -1567,7 +1612,7 @@ export default function Home() {
                         <ClipboardCheck className="h-3.5 w-3.5" /> Plan semanal
                       </div>
                       <h2 className="mt-1 font-display text-2xl text-white">
-                        {otTypeFilter === "CORRECTIVAS" ? "OT correctivas" : otTypeFilter === "PROGRAMADAS" ? "OT programadas" : "Todas las OT"} · Guardia {GUARD_LABEL[guard]}
+                        {otTypeFilter === "PROGRAMADAS" ? "OT programadas" : "Todas las OT"} · Guardia {GUARD_LABEL[guard]}
                       </h2>
                       <p className="mt-1 text-xs text-slate-500">
                         Vista informativa. Las OTs son de solo lectura hasta ingresar su equipo a guardia.
@@ -1577,8 +1622,7 @@ export default function Home() {
                       <div className="flex rounded-xl border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Tipo de OT">
                         {([
                           ["PROGRAMADAS", "Programadas", otTypeCounts.programadas],
-                          ["CORRECTIVAS", "Correctivas", otTypeCounts.correctivas],
-                          ["TODAS", "Todas", otTypeCounts.programadas + otTypeCounts.correctivas],
+                          ["TODAS", "Todas", otTypeCounts.programadas],
                         ] as const).map(([value, label, count]) => (
                           <button
                             key={value}
@@ -2347,7 +2391,7 @@ export default function Home() {
                   Estado de recepción
                 </div>
                 <div className="grid gap-2 sm:grid-cols-3">
-                  {(["RECIBIDA", "PARCIAL", "FALTA_RECIBIR", "REVISADO"] as Status[]).map(
+                  {(["RECIBIDA", "PARCIAL", "FALTA_RECIBIR"] as Status[]).map(
                     status => (
                       <button
                         key={status}
@@ -2408,6 +2452,17 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
+                {editingRow.state?.status === "RECIBIDA" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedWeekId) return;
+                      receptionMutation.mutate({ workOrderId: editingRow.workOrder.id, weekId: selectedWeekId, guard, status: "REVISADO", warehouseCodes: [], responsibleName: operatorName, note: noteDraft || "Revisión conforme" });
+                    }}
+                    disabled={historyOnly || !isFacilitator || receptionMutation.isPending}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-violet-300/30 bg-violet-300/10 px-4 py-3 text-sm font-bold text-violet-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >Marcar revisión conforme</button>
+                )}
                 <button
                   onClick={submitReception}
                   disabled={

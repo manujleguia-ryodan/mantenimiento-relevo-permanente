@@ -60,10 +60,11 @@ export function isEquipmentCycleFinalized(statuses: Array<string | null | undefi
   return areAllWorkOrdersClosed(statuses);
 }
 
-export function matchesOtCycleFilter(input: { receptionStatus?: string | null; executionStatus?: string | null; hasReceptionState?: boolean }, filter: OtCycleFilter) {
+export function matchesOtCycleFilter(input: { receptionStatus?: string | null; executionStatus?: string | null; hasReceptionState?: boolean; isCorrective?: boolean }, filter: OtCycleFilter) {
   const finalized = isWorkOrderClosed(input.executionStatus);
   if (filter === "TODAS") return true;
   if (filter === "FINALIZADAS") return finalized;
+  if (input.isCorrective) return false;
   if (finalized) return false;
   if (filter === "SIN_REVISAR") return !input.hasReceptionState || !input.receptionStatus || input.receptionStatus === "SIN_REVISAR";
   if (filter === "PENDIENTES") return input.receptionStatus === "PARCIAL" || input.receptionStatus === "FALTA_RECIBIR";

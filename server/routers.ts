@@ -760,6 +760,8 @@ export const appRouter = router({
           .limit(1);
         if (!workOrder || workOrder.weekId !== input.weekId)
           throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
+        if (correctiveSource(workOrder.sourceData))
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Las OT correctivas se gestionan directamente en ejecución y no requieren recepción." });
         if (!hasReservation(workOrder.sourceData))
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -831,6 +833,23 @@ export const appRouter = router({
           .limit(1);
         if (!workOrder || workOrder.weekId !== input.weekId)
           throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
+        const isCorrective = correctiveSource(workOrder.sourceData);
+        const [existingExecution] = await db
+          .select()
+          .from(otExecutions)
+          .where(and(eq(otExecutions.workOrderId, input.workOrderId), eq(otExecutions.weekId, input.weekId), eq(otExecutions.guard, input.guard)))
+          .limit(1);
+        if (input.closed && existingExecution?.status === "CERRADA_NOTIFICADA")
+          throw new TRPCError({ code: "CONFLICT", message: "La OT ya está cerrada." });
+        if (input.closed && !isCorrective) {
+          const [receptionState] = await db
+            .select({ status: otStates.status })
+            .from(otStates)
+            .where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard)))
+            .limit(1);
+          if (receptionState?.status !== "REVISADO")
+            throw new TRPCError({ code: "BAD_REQUEST", message: "La OT programada debe estar revisada antes de cerrarse." });
+        }
         const status = input.closed ? "CERRADA_NOTIFICADA" : "ABIERTA";
         const values = {
           status,
@@ -838,11 +857,7 @@ export const appRouter = router({
           executedByName: ctx.user?.name || ctx.user?.email || "Usuario actual",
           executedAt: new Date(),
         } as const;
-        const [existing] = await db
-          .select()
-          .from(otExecutions)
-          .where(and(eq(otExecutions.workOrderId, input.workOrderId), eq(otExecutions.weekId, input.weekId), eq(otExecutions.guard, input.guard)))
-          .limit(1);
+        const existing = existingExecution;
         if (existing) await db.update(otExecutions).set(values).where(eq(otExecutions.id, existing.id));
         else await db.insert(otExecutions).values({
           workOrderId: input.workOrderId,

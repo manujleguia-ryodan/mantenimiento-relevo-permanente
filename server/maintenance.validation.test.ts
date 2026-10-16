@@ -124,6 +124,9 @@ describe("maintenance business rules", () => {
     expect(matchesOtCycleFilter({ receptionStatus: "REVISADO", executionStatus: "CERRADA_NOTIFICADA", hasReceptionState: true }, "REVISADAS")).toBe(false);
     expect(matchesOtCycleFilter({ executionStatus: "CERRADA_NOTIFICADA" }, "FINALIZADAS")).toBe(true);
     expect(matchesOtCycleFilter({ receptionStatus: "PARCIAL", executionStatus: "CERRADA_NOTIFICADA" }, "PENDIENTES")).toBe(false);
+    expect(matchesOtCycleFilter({ isCorrective: true }, "SIN_REVISAR")).toBe(false);
+    expect(matchesOtCycleFilter({ isCorrective: true }, "PENDIENTES")).toBe(false);
+    expect(matchesOtCycleFilter({ isCorrective: true }, "TODAS")).toBe(true);
   });
 
   it("excludes closed OTs from a subsequent equipment re-entry", () => {
