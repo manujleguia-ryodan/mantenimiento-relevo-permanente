@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateReceptionPercent,
   areAllWorkOrdersClosed,
+  canCloseWorkOrder,
   canPurgeSapRescheduledWorkOrder,
   canReviewReception,
   filterActiveWorkshopEquipment,
@@ -77,6 +78,13 @@ describe("maintenance business rules", () => {
     expect(isWorkOrderClosed("PARCIAL")).toBe(false);
     expect(isWorkOrderClosed("FALTA_RECIBIR")).toBe(false);
     expect(isWorkOrderClosed("CERRADA_NOTIFICADA")).toBe(true);
+  });
+
+  it("allows closing scheduled work orders without logistics and requires review when logistics apply", () => {
+    expect(canCloseWorkOrder({ executionStatus: "ABIERTA", receptionStatus: "SIN_REVISAR", requiresLogistics: false })).toBe(true);
+    expect(canCloseWorkOrder({ executionStatus: "ABIERTA", receptionStatus: "SIN_REVISAR", requiresLogistics: true })).toBe(false);
+    expect(canCloseWorkOrder({ executionStatus: "ABIERTA", receptionStatus: "REVISADO", requiresLogistics: true })).toBe(true);
+    expect(canCloseWorkOrder({ executionStatus: "CERRADA_NOTIFICADA", requiresLogistics: false })).toBe(false);
   });
 
   it("separates corrective work orders from scheduled work orders", () => {

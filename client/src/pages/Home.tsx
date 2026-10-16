@@ -6,7 +6,7 @@ import {
   type ExcelImportInvalidRow,
 } from "@shared/excelImport";
 import { parseCorrectiveLines, type CorrectiveDraft } from "@shared/correctiveImport";
-import { filterActiveWorkshopEquipment, getReceptionAction, getReservationValue, hasReservation, isCorrectiveWorkOrder, isWorkOrderClosed, matchesOtCycleFilter, type OtCycleFilter } from "@shared/maintenance";
+import { canCloseWorkOrder, filterActiveWorkshopEquipment, getReceptionAction, getReservationValue, hasReservation, isCorrectiveWorkOrder, isWorkOrderClosed, matchesOtCycleFilter, type OtCycleFilter } from "@shared/maintenance";
 import {
   AlertTriangle,
   ArrowRight,
@@ -780,8 +780,12 @@ export default function Home() {
   }
 
   function canCloseSelectedRow(row: any) {
-    if (isWorkOrderClosed(row.execution?.status)) return false;
-    return isCorrectiveWorkOrder(row.workOrder.sourceData) || row.state?.status === "REVISADO";
+    return canCloseWorkOrder({
+      executionStatus: row.execution?.status,
+      receptionStatus: row.state?.status,
+      requiresLogistics: row.requiresLogistics ?? hasReservation(row.workOrder.sourceData),
+      isCorrective: isCorrectiveWorkOrder(row.workOrder.sourceData),
+    });
   }
 
   async function closeSelectedWorkOrders(rowsToClose: any[]) {

@@ -49,6 +49,12 @@ export function isWorkOrderClosed(status?: string | null) {
   return status === "CERRADA_NOTIFICADA";
 }
 
+export function canCloseWorkOrder(input: { executionStatus?: string | null; receptionStatus?: string | null; requiresLogistics?: boolean; isCorrective?: boolean }) {
+  if (isWorkOrderClosed(input.executionStatus)) return false;
+  if (input.isCorrective || !input.requiresLogistics) return true;
+  return input.receptionStatus === "REVISADO";
+}
+
 export function areAllWorkOrdersClosed(statuses: Array<string | null | undefined>) {
   return statuses.length > 0 && statuses.every(isWorkOrderClosed);
 }

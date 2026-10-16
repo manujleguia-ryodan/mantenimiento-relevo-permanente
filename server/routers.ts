@@ -38,6 +38,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import {
   areAllWorkOrdersClosed,
+  canCloseWorkOrder,
   canPurgeSapRescheduledWorkOrder,
   hasReservation,
   isWorkOrderClosed,
@@ -833,7 +834,7 @@ export const appRouter = router({
           .limit(1);
         if (!workOrder || workOrder.weekId !== input.weekId)
           throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
-        const isCorrective = correctiveSource(workOrder.sourceData);
+        const isCorrective = Boolean(correctiveSource(workOrder.sourceData));
         const [existingExecution] = await db
           .select()
           .from(otExecutions)
@@ -841,13 +842,13 @@ export const appRouter = router({
           .limit(1);
         if (input.closed && existingExecution?.status === "CERRADA_NOTIFICADA")
           throw new TRPCError({ code: "CONFLICT", message: "La OT ya está cerrada." });
-        if (input.closed && !isCorrective) {
+        if (input.closed && !canCloseWorkOrder({ executionStatus: existingExecution?.status, receptionStatus: undefined, requiresLogistics: hasReservation(workOrder.sourceData), isCorrective })) {
           const [receptionState] = await db
             .select({ status: otStates.status })
             .from(otStates)
             .where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.guard, input.guard)))
             .limit(1);
-          if (receptionState?.status !== "REVISADO")
+          if (!canCloseWorkOrder({ executionStatus: existingExecution?.status, receptionStatus: receptionState?.status, requiresLogistics: hasReservation(workOrder.sourceData), isCorrective }))
             throw new TRPCError({ code: "BAD_REQUEST", message: "La OT programada debe estar revisada antes de cerrarse." });
         }
         const status = input.closed ? "CERRADA_NOTIFICADA" : "ABIERTA";
