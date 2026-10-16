@@ -1466,7 +1466,12 @@ export default function Home() {
                     <div className="flex w-full flex-col gap-2 xl:w-auto xl:flex-row xl:flex-wrap xl:items-center">
                       <div className="w-full xl:w-auto">
                         <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-[0.14em] text-emerald-300/70">Tipo de OT</div>
-                        <div className="grid w-full grid-cols-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 xl:w-auto" role="tablist" aria-label="Tipo de OT del turno">
+                        <select value={workshopTypeFilter} onChange={event => setWorkshopTypeFilter(event.target.value as typeof workshopTypeFilter)} className="h-9 w-full rounded-lg border border-white/[0.08] bg-[#151e20] px-2 text-xs font-semibold text-white outline-none focus:border-emerald-300/50 md:hidden" aria-label="Tipo de OT del turno">
+                          <option value="TODAS">Todas las OT</option>
+                          <option value="PROGRAMADAS">Programadas</option>
+                          <option value="CORRECTIVAS">Correctivas</option>
+                        </select>
+                        <div className="hidden w-full grid-cols-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 md:grid xl:w-auto" role="tablist" aria-label="Tipo de OT del turno">
                         {([
                           ["TODAS", "Todas"],
                           ["PROGRAMADAS", "Programadas"],
@@ -1487,7 +1492,14 @@ export default function Home() {
                       </div>
                       <div className="w-full xl:w-auto">
                         <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-[0.14em] text-amber-300/70">Estado de OT</div>
-                        <div className="grid w-full grid-cols-5 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 xl:w-auto" role="tablist" aria-label="Filtro de OTs del turno">
+                        <select value={otCycleFilter} onChange={event => setOtCycleFilter(event.target.value as OtCycleFilter)} className="h-9 w-full rounded-lg border border-white/[0.08] bg-[#151e20] px-2 text-xs font-semibold text-white outline-none focus:border-amber-300/50 md:hidden" aria-label="Estado de OT del turno">
+                          <option value="TODAS">Todos los estados</option>
+                          <option value="SIN_REVISAR">Sin revisar</option>
+                          <option value="PENDIENTES">Pendientes</option>
+                          <option value="REVISADAS">Revisadas</option>
+                          <option value="FINALIZADAS">Finalizadas</option>
+                        </select>
+                        <div className="hidden w-full grid-cols-5 rounded-lg border border-white/[0.08] bg-white/[0.025] p-1 md:grid xl:w-auto" role="tablist" aria-label="Filtro de OTs del turno">
                         {(["TODAS", "SIN_REVISAR", "PENDIENTES", "REVISADAS", "FINALIZADAS"] as OtCycleFilter[]).map(filter => (
                           <button key={filter} type="button" role="tab" aria-selected={otCycleFilter === filter} onClick={() => setOtCycleFilter(filter)} className={`rounded-md px-1.5 py-1.5 text-[9px] font-bold transition ${otCycleFilter === filter ? (filter === "FINALIZADAS" ? "bg-blue-300 text-[#071014]" : "bg-amber-300 text-[#071014]") : "text-slate-400 hover:bg-white/[0.05] hover:text-white"}`}>
                             {filter === "TODAS" ? "Todas" : filter === "SIN_REVISAR" ? "Sin revisar" : filter === "PENDIENTES" ? "Pendiente" : filter === "REVISADAS" ? "Revisado" : "Finalizado"}
