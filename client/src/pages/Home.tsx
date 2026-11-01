@@ -1511,7 +1511,7 @@ export default function Home() {
                       <div className="w-full whitespace-nowrap rounded-lg border border-amber-300/20 bg-amber-300/10 px-2.5 py-2 text-center text-[11px] text-amber-200 xl:w-auto">{filteredWorkshopGroups.length} equipo{filteredWorkshopGroups.length === 1 ? "" : "s"}</div>
                     </div>
                   </div>
-                  {otCycleFilter !== "FINALIZADAS" && (
+                  {otCycleFilter !== "FINALIZADAS" && selectedCloseIds.length > 0 && (
                     <div className="mt-3 flex flex-col gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] p-2.5 sm:flex-row sm:items-center sm:justify-between">
                       <div className="text-[11px] text-slate-400">
                         <b className="text-white">{selectedCloseIds.length}</b> OT seleccionadas
