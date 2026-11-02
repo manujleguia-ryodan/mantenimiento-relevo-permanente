@@ -42,6 +42,7 @@ import {
   canPurgeSapRescheduledWorkOrder,
   hasReservation,
   isWorkOrderClosed,
+  nextOptimisticVersion,
   validateReceptionInput,
 } from "@shared/maintenance";
 import {
@@ -97,6 +98,14 @@ export function insertId(result: unknown) {
     throw new Error("La base de datos no devolvió un ID de inserción válido.");
   }
   return id;
+}
+function affectedRows(result: unknown) {
+  const header = Array.isArray(result) ? result[0] : result;
+  return Number((header as { affectedRows?: number | string | bigint } | null | undefined)?.affectedRows ?? 0);
+}
+function isDuplicateKeyError(error: unknown) {
+  const candidate = error as { code?: string; errno?: number; message?: string } | null | undefined;
+  return candidate?.code === "ER_DUP_ENTRY" || candidate?.errno === 1062 || candidate?.message?.includes("Duplicate entry") === true;
 }
 
 function correctiveSource(sourceData: string | null) {
@@ -780,23 +789,31 @@ export const appRouter = router({
           : [];
         if (selectedWarehouses.length !== warehouseCodes.length)
           throw new TRPCError({ code: "BAD_REQUEST", message: "Uno o más almacenes no están en el catálogo activo." });
-        const [existing] = await db.select().from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId))).limit(1);
         const responsibleName = ctx.user?.name || ctx.user?.email || "Usuario actual";
         const newPendingWarehouse = warehouseCodes.join(", ") || null;
         let stateId: number;
         await db.transaction(async tx => {
+          const [existing] = await tx.select().from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId))).limit(1);
           if (existing) {
             stateId = existing.id;
             const previousPendingWarehouse = (await tx.select({ warehouseCodeSnapshot: otStatePendingWarehouses.warehouseCodeSnapshot }).from(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, existing.id))).map(item => item.warehouseCodeSnapshot).join(", ") || null;
-            await tx.update(otStates).set({ guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null }).where(eq(otStates.id, existing.id));
+            const nextVersion = nextOptimisticVersion(existing.version, existing.version);
+            if (nextVersion === null) throw new TRPCError({ code: "CONFLICT", message: "La versión de la OT no es válida. Recarga la información antes de guardar." });
+            const updated = await tx.update(otStates).set({ guard: input.guard, status: input.status, version: nextVersion, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null }).where(and(eq(otStates.id, existing.id), eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId), eq(otStates.version, existing.version)));
+            if (affectedRows(updated) !== 1) throw new TRPCError({ code: "CONFLICT", message: "La OT fue modificada por otro facilitador. Recarga la información antes de guardar." });
             await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, existing.id));
             if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: existing.id, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
             await tx.insert(otHistory).values({ otStateId: existing.id, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: existing.status, newStatus: input.status, previousPendingWarehouse, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user?.id ?? null, actorName: responsibleName });
           } else {
-            const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null });
-            stateId = insertId(inserted);
-            if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
-            await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user?.id ?? null, actorName: responsibleName });
+            try {
+              const inserted = await tx.insert(otStates).values({ workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, status: input.status, version: 1, pendingWarehouse1: false, pendingWarehouse2: false, responsibleName, reviewedByRole: "facilitator", note: input.note?.trim() || null, updatedById: ctx.user?.id ?? null });
+              stateId = insertId(inserted);
+              if (selectedWarehouses.length) await tx.insert(otStatePendingWarehouses).values(selectedWarehouses.map(warehouse => ({ otStateId: stateId, warehouseId: warehouse.id, warehouseCodeSnapshot: warehouse.code, warehouseNameSnapshot: warehouse.name })));
+              await tx.insert(otHistory).values({ otStateId: stateId, workOrderId: input.workOrderId, weekId: input.weekId, guard: input.guard, previousStatus: null, newStatus: input.status, previousPendingWarehouse: null, newPendingWarehouse, note: input.note?.trim() || null, actorUserId: ctx.user?.id ?? null, actorName: responsibleName });
+            } catch (error) {
+              if (isDuplicateKeyError(error)) throw new TRPCError({ code: "CONFLICT", message: "Otra operación creó la recepción de esta OT. Recarga la información antes de guardar." });
+              throw error;
+            }
           }
         });
         return { success: true, stateId: stateId! };
@@ -863,62 +880,59 @@ export const appRouter = router({
           executedAt: new Date(),
         } as const;
         const existing = existingExecution;
-        if (existing) await db.update(otExecutions).set(values).where(eq(otExecutions.id, existing.id));
-        else await db.insert(otExecutions).values({
-          workOrderId: input.workOrderId,
-          weekId: input.weekId,
-          guard: input.guard,
-          ...values,
-        });
-        const [auditState] = await db.select({ id: otStates.id }).from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId))).limit(1);
-        if (auditState) {
-          await db.insert(otHistory).values({
-            otStateId: auditState.id,
+        return db.transaction(async tx => {
+          if (existing) await tx.update(otExecutions).set(values).where(eq(otExecutions.id, existing.id));
+          else await tx.insert(otExecutions).values({
             workOrderId: input.workOrderId,
             weekId: input.weekId,
             guard: input.guard,
-            previousStatus: existing?.status ?? "ABIERTA",
-            newStatus: status,
-            previousPendingWarehouse: null,
-            newPendingWarehouse: null,
-            note: "Cambio de ejecución",
-            actorUserId: ctx.user?.id ?? null,
-            actorName: ctx.user?.name || ctx.user?.email || "Usuario actual",
+            ...values,
           });
-        }
-        if (input.closed) {
-          await db.update(workOrders).set({ fotoRepuesto: null }).where(eq(workOrders.id, input.workOrderId));
-          await db.delete(guardWorkOrderAssignments).where(and(
-            eq(guardWorkOrderAssignments.weekId, input.weekId),
-            eq(guardWorkOrderAssignments.guard, input.guard),
-            eq(guardWorkOrderAssignments.workOrderId, input.workOrderId),
-          ));
-        }
-        let equipmentDeactivated = false;
-        if (input.closed) {
-          const relatedOrders = await db.select({ id: workOrders.id })
-            .from(workOrders)
-            .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.equipmentId, workOrder.equipmentId), eq(workOrders.isCancelled, false)));
-          const relatedIds = relatedOrders.map(item => item.id);
-          const relatedExecutions = relatedIds.length
-            ? await db.select({ status: otExecutions.status })
-              .from(otExecutions)
-              .where(and(eq(otExecutions.weekId, input.weekId), eq(otExecutions.guard, input.guard), inArray(otExecutions.workOrderId, relatedIds)))
-            : [];
-          const remainingAssignments = await db.select({ id: guardWorkOrderAssignments.id })
-            .from(guardWorkOrderAssignments)
-            .where(and(eq(guardWorkOrderAssignments.weekId, input.weekId), eq(guardWorkOrderAssignments.guard, input.guard), inArray(guardWorkOrderAssignments.workOrderId, relatedIds)));
-          if (!remainingAssignments.length) {
-            const assignmentsAnywhere = await db.select({ id: guardWorkOrderAssignments.id })
+          const [auditState] = await tx.select({ id: otStates.id }).from(otStates).where(and(eq(otStates.workOrderId, input.workOrderId), eq(otStates.weekId, input.weekId))).limit(1);
+          if (auditState) {
+            await tx.insert(otHistory).values({
+              otStateId: auditState.id,
+              workOrderId: input.workOrderId,
+              weekId: input.weekId,
+              guard: input.guard,
+              previousStatus: existing?.status ?? "ABIERTA",
+              newStatus: status,
+              previousPendingWarehouse: null,
+              newPendingWarehouse: null,
+              note: "Cambio de ejecución",
+              actorUserId: ctx.user?.id ?? null,
+              actorName: ctx.user?.name || ctx.user?.email || "Usuario actual",
+            });
+          }
+          if (input.closed) {
+            await tx.update(workOrders).set({ fotoRepuesto: null }).where(eq(workOrders.id, input.workOrderId));
+            await tx.delete(guardWorkOrderAssignments).where(and(
+              eq(guardWorkOrderAssignments.weekId, input.weekId),
+              eq(guardWorkOrderAssignments.guard, input.guard),
+              eq(guardWorkOrderAssignments.workOrderId, input.workOrderId),
+            ));
+          }
+          let equipmentDeactivated = false;
+          if (input.closed) {
+            const relatedOrders = await tx.select({ id: workOrders.id })
+              .from(workOrders)
+              .where(and(eq(workOrders.weekId, input.weekId), eq(workOrders.equipmentId, workOrder.equipmentId), eq(workOrders.isCancelled, false)));
+            const relatedIds = relatedOrders.map(item => item.id);
+            const remainingAssignments = await tx.select({ id: guardWorkOrderAssignments.id })
               .from(guardWorkOrderAssignments)
-              .where(inArray(guardWorkOrderAssignments.workOrderId, relatedIds));
-            if (!assignmentsAnywhere.length) {
-              await db.update(equipment).set({ activo_en_taller: false }).where(eq(equipment.id, workOrder.equipmentId));
-              equipmentDeactivated = true;
+              .where(and(eq(guardWorkOrderAssignments.weekId, input.weekId), eq(guardWorkOrderAssignments.guard, input.guard), inArray(guardWorkOrderAssignments.workOrderId, relatedIds)));
+            if (!remainingAssignments.length) {
+              const assignmentsAnywhere = await tx.select({ id: guardWorkOrderAssignments.id })
+                .from(guardWorkOrderAssignments)
+                .where(inArray(guardWorkOrderAssignments.workOrderId, relatedIds));
+              if (!assignmentsAnywhere.length) {
+                await tx.update(equipment).set({ activo_en_taller: false }).where(eq(equipment.id, workOrder.equipmentId));
+                equipmentDeactivated = true;
+              }
             }
           }
-        }
-        return { success: true, status, equipmentDeactivated };
+          return { success: true, status, equipmentDeactivated };
+        });
       }),
 
     history: sharedAccessProcedure
@@ -949,12 +963,6 @@ export const appRouter = router({
             const state = row.state!;
             const pendingWarehouses = row.pendingWarehouses.map(item => ({ code: item.warehouseCodeSnapshot, name: item.warehouseNameSnapshot }));
             await tx.insert(handoverItems).values({ handoverId, otStateId: state.id, workOrderId: row.workOrder.id, statusSnapshot: state.status, pendingWarehousesSnapshot: JSON.stringify(pendingWarehouses), fromGuardSnapshot: input.fromGuard, toGuardSnapshot: input.toGuard, createdByIdSnapshot: ctx.user?.id ?? null, createdAtSnapshot: new Date() });
-            const [incoming] = await tx.select().from(otStates).where(and(eq(otStates.workOrderId, row.workOrder.id), eq(otStates.weekId, input.weekId))).limit(1);
-            let incomingId = incoming?.id;
-            if (incoming) await tx.update(otStates).set({ guard: input.toGuard, status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user?.id ?? null, updatedAt: new Date() }).where(eq(otStates.id, incoming.id));
-            else { const created = await tx.insert(otStates).values({ workOrderId: row.workOrder.id, weekId: input.weekId, guard: input.toGuard, status: state.status, pendingWarehouse1: false, pendingWarehouse2: false, inheritedFromHandoverId: handoverId, responsibleName: state.responsibleName, note: state.note, updatedById: ctx.user?.id ?? null }); incomingId = insertId(created); }
-            await tx.delete(otStatePendingWarehouses).where(eq(otStatePendingWarehouses.otStateId, incomingId!));
-            if (row.pendingWarehouses.length) await tx.insert(otStatePendingWarehouses).values(row.pendingWarehouses.map(item => ({ otStateId: incomingId!, warehouseId: item.warehouseId, warehouseCodeSnapshot: item.warehouseCodeSnapshot, warehouseNameSnapshot: item.warehouseNameSnapshot })));
             const [assignment] = await tx.select().from(guardAssignments).where(and(eq(guardAssignments.weekId, input.weekId), eq(guardAssignments.guard, input.toGuard), eq(guardAssignments.equipmentId, row.workOrder.equipmentId))).limit(1);
             if (!assignment) await tx.insert(guardAssignments).values({ weekId: input.weekId, guard: input.toGuard, equipmentId: row.workOrder.equipmentId, selectedById: ctx.user?.id ?? null });
           }

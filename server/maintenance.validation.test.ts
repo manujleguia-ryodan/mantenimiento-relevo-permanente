@@ -14,6 +14,7 @@ import {
   isWorkOrderClosed,
   matchesOtCycleFilter,
   isCorrectiveWorkOrder,
+  nextOptimisticVersion,
   selectLatestSharedReceptionState,
   validateReceptionInput,
 } from "@shared/maintenance";
@@ -89,6 +90,12 @@ describe("maintenance business rules", () => {
       { id: 20, guard: "A", updatedAt: "2026-09-28T15:18:53Z" },
       { id: 21, guard: "B", updatedAt: "2026-09-28T15:18:53Z" },
     ])?.id).toBe(21);
+  });
+
+  it("advances only a matching optimistic version", () => {
+    expect(nextOptimisticVersion(1, 1)).toBe(2);
+    expect(nextOptimisticVersion(8, 7)).toBeNull();
+    expect(nextOptimisticVersion(0, 0)).toBeNull();
   });
 
   it("allows closing scheduled work orders without logistics and requires review when logistics apply", () => {

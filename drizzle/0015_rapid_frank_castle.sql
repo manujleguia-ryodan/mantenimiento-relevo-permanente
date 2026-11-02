@@ -1,0 +1,1 @@
+ALTER TABLE `otStates` ADD `version` int DEFAULT 1 NOT NULL;

@@ -58,6 +58,11 @@ export function selectLatestSharedReceptionState<T extends { id: number; updated
   }, undefined);
 }
 
+export function nextOptimisticVersion(currentVersion: number, readVersion: number) {
+  if (!Number.isSafeInteger(currentVersion) || !Number.isSafeInteger(readVersion) || currentVersion < 1 || readVersion < 1 || currentVersion !== readVersion) return null;
+  return currentVersion + 1;
+}
+
 export function canCloseWorkOrder(input: { executionStatus?: string | null; receptionStatus?: string | null; requiresLogistics?: boolean; isCorrective?: boolean }) {
   if (isWorkOrderClosed(input.executionStatus)) return false;
   if (input.isCorrective || !input.requiresLogistics) return true;
