@@ -5,7 +5,7 @@ import {
   maintenanceWeeks, otExecutions, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { hasReservation, isCorrectiveWorkOrder } from "../shared/maintenance";
+import { hasReservation, isCorrectiveWorkOrder, selectLatestSharedReceptionState } from "../shared/maintenance";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
@@ -66,7 +66,7 @@ export async function getDashboardData(
   const selectedWorkOrderIds = selectedWorkOrders.map(item => item.workOrderId);
   const rows = await db.select({ workOrder: workOrders, equipment, state: otStates, execution: otExecutions, inheritedFrom: handovers.fromGuard })
     .from(workOrders).leftJoin(equipment, eq(workOrders.equipmentId, equipment.id))
-    .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId), eq(otStates.guard, guard)))
+    .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId)))
     .leftJoin(otExecutions, and(eq(otExecutions.workOrderId, workOrders.id), eq(otExecutions.weekId, weekId), eq(otExecutions.guard, guard)))
     .leftJoin(handovers, eq(otStates.inheritedFromHandoverId, handovers.id)).where(and(eq(workOrders.weekId, weekId), eq(workOrders.isCancelled, false)));
   // La vista maestra OT y recepción debe mostrar todas las OTs importadas de la semana.
@@ -78,7 +78,9 @@ export async function getDashboardData(
     : [];
   const latestStateByWorkOrder = new Map<number, (typeof allStates)[number]>();
   for (const candidate of allStates) {
-    if (!latestStateByWorkOrder.has(candidate.workOrderId)) latestStateByWorkOrder.set(candidate.workOrderId, candidate);
+    const current = latestStateByWorkOrder.get(candidate.workOrderId);
+    const latest = selectLatestSharedReceptionState(current ? [current, candidate] : [candidate]);
+    if (latest) latestStateByWorkOrder.set(candidate.workOrderId, latest);
   }
   const sharedStateRows = visibleRows.map(row => ({
     ...row,
@@ -116,7 +118,8 @@ export async function searchHistoricalWorkOrders(equipmentQuery: string, otType:
   const latestState = new Map<number, (typeof states)[number]>();
   for (const state of states) {
     const current = latestState.get(state.workOrderId);
-    if (!current || new Date(state.updatedAt).getTime() >= new Date(current.updatedAt).getTime()) latestState.set(state.workOrderId, state);
+    const latest = selectLatestSharedReceptionState(current ? [current, state] : [state]);
+    if (latest) latestState.set(state.workOrderId, latest);
   }
   return filteredRows.map(row => ({ ...row, state: latestState.get(row.workOrder.id) ?? null }));
 }

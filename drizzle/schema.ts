@@ -122,7 +122,7 @@ export const otStates = mysqlTable("otStates", {
   inheritedFromHandoverId: int("inheritedFromHandoverId"), responsibleName: varchar("responsibleName", { length: 160 }), reviewedByRole: varchar("reviewedByRole", { length: 32 }),
   note: text("note"), updatedById: int("updatedById"), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => ({
-  stateUnique: uniqueIndex("otStates_unique").on(table.workOrderId, table.weekId, table.guard),
+  stateUnique: uniqueIndex("otStates_unique").on(table.workOrderId, table.weekId),
   stateLookupIdx: index("otStates_lookup_idx").on(table.weekId, table.guard, table.status),
   inheritedIdx: index("otStates_inherited_idx").on(table.inheritedFromHandoverId),
 }));

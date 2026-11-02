@@ -14,6 +14,7 @@ import {
   isWorkOrderClosed,
   matchesOtCycleFilter,
   isCorrectiveWorkOrder,
+  selectLatestSharedReceptionState,
   validateReceptionInput,
 } from "@shared/maintenance";
 
@@ -78,6 +79,16 @@ describe("maintenance business rules", () => {
     expect(isWorkOrderClosed("PARCIAL")).toBe(false);
     expect(isWorkOrderClosed("FALTA_RECIBIR")).toBe(false);
     expect(isWorkOrderClosed("CERRADA_NOTIFICADA")).toBe(true);
+  });
+
+  it("selects one shared reception state by recency regardless of guard", () => {
+    const older = { id: 10, guard: "A", status: "PARCIAL", updatedAt: "2026-09-28T15:17:49Z" };
+    const newer = { id: 11, guard: "D", status: "RECIBIDA", updatedAt: "2026-09-28T15:18:53Z" };
+    expect(selectLatestSharedReceptionState([older, newer])).toEqual(newer);
+    expect(selectLatestSharedReceptionState([
+      { id: 20, guard: "A", updatedAt: "2026-09-28T15:18:53Z" },
+      { id: 21, guard: "B", updatedAt: "2026-09-28T15:18:53Z" },
+    ])?.id).toBe(21);
   });
 
   it("allows closing scheduled work orders without logistics and requires review when logistics apply", () => {

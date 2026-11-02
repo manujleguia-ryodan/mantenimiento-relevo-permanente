@@ -49,6 +49,15 @@ export function isWorkOrderClosed(status?: string | null) {
   return status === "CERRADA_NOTIFICADA";
 }
 
+export function selectLatestSharedReceptionState<T extends { id: number; updatedAt: Date | string | number }>(states: T[]) {
+  return states.reduce<T | undefined>((latest, candidate) => {
+    if (!latest) return candidate;
+    const latestTime = new Date(latest.updatedAt).getTime();
+    const candidateTime = new Date(candidate.updatedAt).getTime();
+    return candidateTime > latestTime || (candidateTime === latestTime && candidate.id > latest.id) ? candidate : latest;
+  }, undefined);
+}
+
 export function canCloseWorkOrder(input: { executionStatus?: string | null; receptionStatus?: string | null; requiresLogistics?: boolean; isCorrective?: boolean }) {
   if (isWorkOrderClosed(input.executionStatus)) return false;
   if (input.isCorrective || !input.requiresLogistics) return true;
