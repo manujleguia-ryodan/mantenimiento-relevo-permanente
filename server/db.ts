@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser, equipment, guardAssignments, guardWorkOrderAssignments, guardRelations, handoverItems, handovers, supervisorAssignments,
-  maintenanceWeeks, otExecutions, otHistory, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
+  maintenanceWeeks, otExecutions, otHistory, otReceptions, otStatePendingWarehouses, otStates, users, warehouses, workOrders,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { hasReservation, isCorrectiveWorkOrder, selectLatestSharedReceptionState } from "../shared/maintenance";
@@ -64,10 +64,11 @@ export async function getDashboardData(
     .from(guardWorkOrderAssignments)
     .where(and(eq(guardWorkOrderAssignments.weekId, weekId), eq(guardWorkOrderAssignments.guard, guard)));
   const selectedWorkOrderIds = selectedWorkOrders.map(item => item.workOrderId);
-  const rows = await db.select({ workOrder: workOrders, equipment, state: otStates, execution: otExecutions, inheritedFrom: handovers.fromGuard })
+  const rows = await db.select({ workOrder: workOrders, equipment, state: otStates, execution: otExecutions, inheritedFrom: handovers.fromGuard, reception: otReceptions })
     .from(workOrders).leftJoin(equipment, eq(workOrders.equipmentId, equipment.id))
     .leftJoin(otStates, and(eq(otStates.workOrderId, workOrders.id), eq(otStates.weekId, weekId)))
     .leftJoin(otExecutions, and(eq(otExecutions.workOrderId, workOrders.id), eq(otExecutions.weekId, weekId), eq(otExecutions.guard, guard)))
+    .leftJoin(otReceptions, and(eq(otReceptions.workOrderId, workOrders.id), eq(otReceptions.weekId, weekId)))
     .leftJoin(handovers, eq(otStates.inheritedFromHandoverId, handovers.id)).where(and(eq(workOrders.weekId, weekId), eq(workOrders.isCancelled, false)));
   // La vista maestra OT y recepción debe mostrar todas las OTs importadas de la semana.
   // La selección operativa se aplica únicamente al catálogo de equipos de la vista de guardia.
@@ -94,6 +95,9 @@ export async function getDashboardData(
     ...row,
     requiresLogistics: hasReservation(row.workOrder.sourceData),
     pendingWarehouses: row.state?.id ? pendingByState.get(row.state.id) ?? [] : [],
+    reception: row.reception
+      ? { status: row.reception.status, observation: row.reception.observation, version: row.reception.version }
+      : { status: "NO_RECIBIDO" as const, observation: null, version: 0 },
   }));
   return { week, guard, selectedEquipmentIds: selectedIds, selectedWorkOrderIds, rows: enrichedRows, selectedEquipment: weekEquipment.filter(item => selectedIds.includes(item.id)), allEquipment: weekEquipment, warehouses: await getWarehouses() };
 }

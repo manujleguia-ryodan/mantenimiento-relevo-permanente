@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mapExcelRows, rowsFromExcelMatrix } from "@shared/excelImport";
+import { hasReservation } from "@shared/maintenance";
 import { buildGuardAssignmentRows, buildGuardWorkOrderAssignmentRows, insertId } from "./routers";
 
 describe("Excel import mapping", () => {
@@ -135,6 +136,44 @@ describe("Excel import mapping", () => {
     expect(result.invalid).toBe(0);
     expect(result.detectedColumns.equipment).toBe(
       "DESCRIPCIÓN DE UBICACIÓN TÉCNICA"
+    );
+  });
+
+  it("evaluates consolidated reservation markers without changing other columns", () => {
+    const importOperations = (firstReservation: string, secondReservation: string) =>
+      mapExcelRows([
+        {
+          "Orden de trabajo": "TEST-OT-1",
+          Equipo: "TEST-EQ-1",
+          "N° Operación": "10",
+          Reserva: firstReservation,
+          Detalle: "PRIMERA OPERACIÓN",
+        },
+        {
+          "Orden de trabajo": "TEST-OT-1",
+          Equipo: "TEST-EQ-1",
+          "N° Operación": "20",
+          Reserva: secondReservation,
+          Detalle: "SEGUNDA OPERACIÓN",
+        },
+      ]);
+
+    const markersOnly = importOperations("0", "—");
+    expect(markersOnly.rows).toHaveLength(1);
+    expect(markersOnly.rows[0]?.extra?.Reserva).toBe('["0","—"]');
+    expect(hasReservation(JSON.stringify(markersOnly.rows[0]?.extra))).toBe(false);
+    expect(markersOnly.rows[0]?.extra?.Detalle).toBe(
+      '["PRIMERA OPERACIÓN","SEGUNDA OPERACIÓN"]'
+    );
+
+    const withRealReservation = importOperations("0", "REPUESTO 123");
+    expect(withRealReservation.rows).toHaveLength(1);
+    expect(withRealReservation.rows[0]?.extra?.Reserva).toBe(
+      '["0","REPUESTO 123"]'
+    );
+    expect(hasReservation(JSON.stringify(withRealReservation.rows[0]?.extra))).toBe(true);
+    expect(withRealReservation.rows[0]?.extra?.Detalle).toBe(
+      '["PRIMERA OPERACIÓN","SEGUNDA OPERACIÓN"]'
     );
   });
 

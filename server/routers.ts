@@ -13,6 +13,8 @@ import {
   maintenanceWeeks,
   otExecutions,
   otHistory,
+  otReceptionHistory,
+  otReceptions,
   otStatePendingWarehouses,
   otStates,
   supervisorAssignments,
@@ -52,6 +54,7 @@ import {
   createSharedAccessUser,
   getConfiguredSharedPin,
   getSharedAccessGuard,
+  getSharedAccessCodeId,
   getSharedAccessName,
   getSharedAccessRole,
   hashAccessCode,
@@ -136,6 +139,31 @@ async function moveWorkOrderToWeek(db: Awaited<ReturnType<typeof requireDb>>, wo
   await db.update(otExecutions).set({ weekId: toWeekId }).where(and(eq(otExecutions.workOrderId, workOrderId), eq(otExecutions.weekId, fromWeekId)));
 }
 
+async function requireReceptionFacilitator(db: Awaited<ReturnType<typeof requireDb>>, req: Parameters<typeof hasSharedAccess>[0], role: string, loginMethod: string | null) {
+  if (role !== "facilitator" || loginMethod !== "shared-pin" || !hasSharedAccess(req)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "La recepción requiere una sesión individual activa de Facilitador." });
+  }
+  const accessCodeId = getSharedAccessCodeId(req);
+  if (!accessCodeId) throw new TRPCError({ code: "UNAUTHORIZED", message: "La sesión no identifica un acceso individual. Inicia sesión nuevamente." });
+  const [facilitator] = await db.select({ id: accessCodes.id, label: accessCodes.label, guard: accessCodes.guard })
+    .from(accessCodes)
+    .where(and(eq(accessCodes.id, accessCodeId), eq(accessCodes.active, true), eq(accessCodes.role, "facilitator")))
+    .limit(1);
+  if (!facilitator) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "No se pudo vincular la sesión con un Facilitador activo. Inicia sesión nuevamente." });
+  }
+  return facilitator;
+}
+
+async function requireReservableWorkOrder(db: Awaited<ReturnType<typeof requireDb>>, workOrderId: number, weekId: number) {
+  const [week] = await db.select({ id: maintenanceWeeks.id }).from(maintenanceWeeks).where(eq(maintenanceWeeks.id, weekId)).limit(1);
+  if (!week) throw new TRPCError({ code: "NOT_FOUND", message: "Semana no encontrada." });
+  const [workOrder] = await db.select({ id: workOrders.id, weekId: workOrders.weekId, sourceData: workOrders.sourceData })
+    .from(workOrders).where(eq(workOrders.id, workOrderId)).limit(1);
+  if (!workOrder || workOrder.weekId !== weekId) throw new TRPCError({ code: "NOT_FOUND", message: "OT no encontrada para esta semana." });
+  if (!hasReservation(workOrder.sourceData)) throw new TRPCError({ code: "BAD_REQUEST", message: "La OT no tiene una reserva en esta semana." });
+}
+
 export function buildGuardAssignmentRows(
   weekId: number,
   guard: "A" | "B" | "C" | "D",
@@ -215,6 +243,7 @@ export const appRouter = router({
         let accessRole: "admin" | "facilitator" | "supervisor" | null = null;
         let accessGuard: "A" | "B" | "C" | "D" = "A";
         let accessName = "Acceso compartido";
+        let accessCodeId: number | null = null;
         const db = await getDb();
         if (!input.selectedUserId || input.selectedUserId === "admin") {
           if (matchesSharedPin(input.pin, configuredPin)) accessRole = "admin";
@@ -228,6 +257,7 @@ export const appRouter = router({
             accessRole = selected.role;
             accessGuard = selected.guard;
             accessName = selected.label;
+            accessCodeId = selected.id;
             await db.update(accessCodes).set({ lastUsedAt: new Date() }).where(eq(accessCodes.id, selected.id));
           }
         } else if (!accessRole && db && !input.selectedUserId) {
@@ -237,6 +267,7 @@ export const appRouter = router({
             accessRole = matched.role;
             accessGuard = matched.guard;
             accessName = matched.label;
+            accessCodeId = matched.id;
             await db.update(accessCodes).set({ lastUsedAt: new Date() }).where(eq(accessCodes.id, matched.id));
           }
         }
@@ -253,7 +284,8 @@ export const appRouter = router({
             Date.now() + SHARED_ACCESS_TTL_MS,
             accessRole,
             accessGuard,
-            accessName
+            accessName,
+            accessCodeId
           ),
           {
             ...getSessionCookieOptions(ctx.req),
@@ -751,6 +783,95 @@ export const appRouter = router({
           })));
         }
         return getDashboardData(input.weekId, input.guard, "supervisor", supervisorName);
+      }),
+
+    markReceptionReceived: facilitatorProcedure
+      .input(z.object({
+        workOrderId: z.number().int().positive(),
+        weekId: z.number().int().positive(),
+        expectedVersion: z.number().int().min(0),
+        observation: z.string().trim().max(10000).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const facilitator = await requireReceptionFacilitator(db, ctx.req, ctx.user!.role, ctx.user!.loginMethod);
+        await requireReservableWorkOrder(db, input.workOrderId, input.weekId);
+        const observation = input.observation || null;
+        try {
+          return await db.transaction(async tx => {
+            const [current] = await tx.select().from(otReceptions)
+              .where(and(eq(otReceptions.workOrderId, input.workOrderId), eq(otReceptions.weekId, input.weekId))).limit(1);
+            if (current?.status === "RECIBIDO") {
+              return { status: current.status, observation: current.observation, version: current.version };
+            }
+            if ((current?.version ?? 0) !== input.expectedVersion) {
+              throw new TRPCError({ code: "CONFLICT", message: "La recepción cambió. Consulta el estado vigente antes de volver a intentar." });
+            }
+            if (current) {
+              const updated = await tx.update(otReceptions).set({
+                status: "RECIBIDO", observation, version: current.version + 1,
+                updatedAt: new Date(), updatedById: facilitator.id, updatedByName: facilitator.label, updatedGuard: facilitator.guard,
+              }).where(and(eq(otReceptions.id, current.id), eq(otReceptions.version, input.expectedVersion)));
+              if (affectedRows(updated) !== 1) throw new TRPCError({ code: "CONFLICT", message: "La recepción cambió. Consulta el estado vigente antes de volver a intentar." });
+              await tx.insert(otReceptionHistory).values({
+                workOrderId: input.workOrderId, weekId: input.weekId, previousStatus: "NO_RECIBIDO", newStatus: "RECIBIDO",
+                previousObservation: current.observation, newObservation: observation,
+                facilitatorId: facilitator.id, facilitatorName: facilitator.label, guard: facilitator.guard,
+              });
+              return { status: "RECIBIDO" as const, observation, version: current.version + 1 };
+            }
+            if (input.expectedVersion !== 0) {
+              throw new TRPCError({ code: "CONFLICT", message: "La recepción cambió. Consulta el estado vigente antes de volver a intentar." });
+            }
+            const inserted = await tx.insert(otReceptions).values({
+              workOrderId: input.workOrderId, weekId: input.weekId, status: "RECIBIDO", observation, version: 1,
+              updatedById: facilitator.id, updatedByName: facilitator.label, updatedGuard: facilitator.guard,
+            });
+            insertId(inserted);
+            await tx.insert(otReceptionHistory).values({
+              workOrderId: input.workOrderId, weekId: input.weekId, previousStatus: "NO_RECIBIDO", newStatus: "RECIBIDO",
+              previousObservation: null, newObservation: observation,
+              facilitatorId: facilitator.id, facilitatorName: facilitator.label, guard: facilitator.guard,
+            });
+            return { status: "RECIBIDO" as const, observation, version: 1 };
+          });
+        } catch (error) {
+          if (isDuplicateKeyError(error)) throw new TRPCError({ code: "CONFLICT", message: "Otro Facilitador registró la recepción simultáneamente. Consulta el estado vigente." });
+          throw error;
+        }
+      }),
+
+    revertReception: facilitatorProcedure
+      .input(z.object({
+        workOrderId: z.number().int().positive(),
+        weekId: z.number().int().positive(),
+        expectedVersion: z.number().int().min(0),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await requireDb();
+        const facilitator = await requireReceptionFacilitator(db, ctx.req, ctx.user!.role, ctx.user!.loginMethod);
+        await requireReservableWorkOrder(db, input.workOrderId, input.weekId);
+        return db.transaction(async tx => {
+          const [current] = await tx.select().from(otReceptions)
+            .where(and(eq(otReceptions.workOrderId, input.workOrderId), eq(otReceptions.weekId, input.weekId))).limit(1);
+          if (!current || current.status === "NO_RECIBIDO") {
+            return { status: "NO_RECIBIDO" as const, observation: current?.observation ?? null, version: current?.version ?? 0 };
+          }
+          if (current.version !== input.expectedVersion) {
+            throw new TRPCError({ code: "CONFLICT", message: "La recepción cambió. Consulta el estado vigente antes de volver a intentar." });
+          }
+          const updated = await tx.update(otReceptions).set({
+            status: "NO_RECIBIDO", observation: null, version: current.version + 1,
+            updatedAt: new Date(), updatedById: facilitator.id, updatedByName: facilitator.label, updatedGuard: facilitator.guard,
+          }).where(and(eq(otReceptions.id, current.id), eq(otReceptions.version, input.expectedVersion)));
+          if (affectedRows(updated) !== 1) throw new TRPCError({ code: "CONFLICT", message: "La recepción cambió. Consulta el estado vigente antes de volver a intentar." });
+          await tx.insert(otReceptionHistory).values({
+            workOrderId: input.workOrderId, weekId: input.weekId, previousStatus: "RECIBIDO", newStatus: "NO_RECIBIDO",
+            previousObservation: current.observation, newObservation: null,
+            facilitatorId: facilitator.id, facilitatorName: facilitator.label, guard: facilitator.guard,
+          });
+          return { status: "NO_RECIBIDO" as const, observation: null, version: current.version + 1 };
+        });
       }),
 
     updateReception: facilitatorProcedure

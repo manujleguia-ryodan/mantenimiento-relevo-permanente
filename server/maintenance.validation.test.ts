@@ -56,7 +56,42 @@ describe("maintenance business rules", () => {
     expect(hasReservation('{"Reserva":"3157775"}')).toBe(true);
     expect(hasReservation('{"RESERVA":""}')).toBe(false);
     expect(hasReservation('{"RESERVA":"0"}')).toBe(false);
+    expect(hasReservation('{"Reserva":"REPUESTO 123"}')).toBe(true);
+    expect(hasReservation('{"Reserva":"-"}')).toBe(false);
+    expect(hasReservation('{"Reserva":"—"}')).toBe(false);
+    expect(hasReservation('{"Reserva":"   "}')).toBe(false);
+    expect(hasReservation('{"Reserva":"  REPUESTO 123  "}')).toBe(true);
+    expect(hasReservation('{"Reserva":" 0 "}')).toBe(false);
     expect(hasReservation(null)).toBe(false);
+    expect(hasReservation(undefined)).toBe(false);
+  });
+
+  it("checks consolidated JSON reservation arrays element by element", () => {
+    const withReservation = (value: unknown) => JSON.stringify({ Reserva: value });
+
+    expect(hasReservation(withReservation('["0","—"]'))).toBe(false);
+    expect(hasReservation(withReservation('["-","0"]'))).toBe(false);
+    expect(hasReservation(withReservation('["0",""]'))).toBe(false);
+    expect(hasReservation(withReservation("[]"))).toBe(false);
+    expect(hasReservation(withReservation('["0","REPUESTO 123"]'))).toBe(true);
+    expect(hasReservation(withReservation('["—","REPUESTO 123"]'))).toBe(true);
+    expect(hasReservation(withReservation('["REPUESTO 123","REPUESTO 456"]'))).toBe(true);
+  });
+
+  it("preserves individual values and rejects nested non-scalar values", () => {
+    const withReservation = (value: unknown) => JSON.stringify({ Reserva: value });
+
+    expect(hasReservation(withReservation("TEXTO SIN FORMATO"))).toBe(true);
+    expect(hasReservation(withReservation('["0",]'))).toBe(true);
+    expect(hasReservation(withReservation(123))).toBe(true);
+    expect(hasReservation(withReservation(true))).toBe(true);
+    expect(hasReservation(withReservation(null))).toBe(false);
+    expect(hasReservation(withReservation({ codigo: "REPUESTO 123" }))).toBe(false);
+    expect(hasReservation(withReservation([["REPUESTO 123"]]))).toBe(false);
+    expect(hasReservation(withReservation('[{"codigo":"REPUESTO 123"}]'))).toBe(false);
+    expect(hasReservation(withReservation('[["REPUESTO 123"]]'))).toBe(false);
+
+    expect(getReservationValue(withReservation('["0","—"]'))).toBe('["0","—"]');
   });
 
   it("allows repeated review of pending reception states", () => {

@@ -166,6 +166,37 @@ export const handoverItems = mysqlTable("handoverItems", {
   createdByIdSnapshot: int("createdByIdSnapshot"), createdAtSnapshot: timestamp("createdAtSnapshot"),
 }, table => ({ itemUnique: uniqueIndex("handoverItems_unique").on(table.handoverId, table.otStateId) }));
 
+export const otReceptions = mysqlTable("otReceptions", {
+  id: int("id").autoincrement().primaryKey(),
+  workOrderId: int("workOrderId").notNull(),
+  weekId: int("weekId").notNull(),
+  status: mysqlEnum("status", ["RECIBIDO", "NO_RECIBIDO"]).default("NO_RECIBIDO").notNull(),
+  observation: text("observation"),
+  version: int("version").default(1).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedById: int("updatedById").notNull(),
+  updatedByName: varchar("updatedByName", { length: 160 }).notNull(),
+  updatedGuard: mysqlEnum("updatedGuard", ["A", "B", "C", "D"]).notNull(),
+}, table => ({
+  receptionUnique: uniqueIndex("otReceptions_workOrder_week_unique").on(table.workOrderId, table.weekId),
+}));
+
+export const otReceptionHistory = mysqlTable("otReceptionHistory", {
+  id: int("id").autoincrement().primaryKey(),
+  workOrderId: int("workOrderId").notNull(),
+  weekId: int("weekId").notNull(),
+  previousStatus: mysqlEnum("previousStatus", ["RECIBIDO", "NO_RECIBIDO"]).notNull(),
+  newStatus: mysqlEnum("newStatus", ["RECIBIDO", "NO_RECIBIDO"]).notNull(),
+  previousObservation: text("previousObservation"),
+  newObservation: text("newObservation"),
+  facilitatorId: int("facilitatorId").notNull(),
+  facilitatorName: varchar("facilitatorName", { length: 160 }).notNull(),
+  guard: mysqlEnum("guard", ["A", "B", "C", "D"]).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => ({
+  historyLookupIdx: index("otReceptionHistory_ot_week_created_idx").on(table.workOrderId, table.weekId, table.createdAt),
+}));
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type MaintenanceWeek = typeof maintenanceWeeks.$inferSelect;

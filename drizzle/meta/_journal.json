@@ -113,6 +113,13 @@
       "when": 1793605321365,
       "tag": "0015_rapid_frank_castle",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1793759442390,
+      "tag": "0016_handy_dragon_man",
+      "breakpoints": true
     }
   ]
 }

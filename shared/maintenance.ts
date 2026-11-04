@@ -12,23 +12,70 @@ function normalizeSourceKey(value: string) {
     .replace(/[^a-z0-9]/g, "");
 }
 
-export function getReservationValue(sourceData?: string | null) {
-  if (!sourceData) return "";
+function getReservationEntry(sourceData?: string | null): unknown {
+  if (!sourceData) return undefined;
   try {
     const parsed: unknown = JSON.parse(sourceData);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
-    const entry = Object.entries(parsed as Record<string, unknown>).find(
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    return Object.entries(parsed as Record<string, unknown>).find(
       ([key]) => normalizeSourceKey(key) === "reserva"
     )?.[1];
-    const value = String(entry ?? "").trim();
-    return value === "0" || value === "—" || value === "-" ? "" : value;
   } catch {
-    return "";
+    return undefined;
   }
 }
 
+const EMPTY_RESERVATION_MARKERS = new Set(["0", "-", "\u2014"]);
+
+function hasReservationScalar(value: unknown, rejectStructuredText = false) {
+  if (value === null || value === undefined || typeof value === "object") return false;
+
+  const normalized = String(value).trim();
+  if (!normalized || EMPTY_RESERVATION_MARKERS.has(normalized)) return false;
+
+  if (rejectStructuredText && typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(normalized);
+      if (parsed !== null && typeof parsed === "object") return false;
+    } catch {
+      // Plain text cells are valid reservation values even when they are not JSON.
+    }
+  }
+
+  return true;
+}
+
+function hasReservationValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (Array.isArray(value)) {
+    return value.some(item => hasReservationScalar(item, true));
+  }
+  if (typeof value === "object") return false;
+
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!normalized || EMPTY_RESERVATION_MARKERS.has(normalized)) return false;
+    try {
+      const parsed: unknown = JSON.parse(normalized);
+      if (Array.isArray(parsed)) {
+        return parsed.some(item => hasReservationScalar(item, true));
+      }
+    } catch {
+      // Preserve the existing treatment of individual, non-JSON cell values.
+    }
+  }
+
+  return hasReservationScalar(value);
+}
+
+export function getReservationValue(sourceData?: string | null) {
+  const entry = getReservationEntry(sourceData);
+  const value = String(entry ?? "").trim();
+  return EMPTY_RESERVATION_MARKERS.has(value) ? "" : value;
+}
+
 export function hasReservation(sourceData?: string | null) {
-  return Boolean(getReservationValue(sourceData));
+  return hasReservationValue(getReservationEntry(sourceData));
 }
 
 export function isCorrectiveWorkOrder(sourceData?: string | null) {

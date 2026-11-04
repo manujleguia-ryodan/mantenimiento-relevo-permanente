@@ -365,7 +365,12 @@ export default function Home() {
   });
   const dashboard = trpc.maintenance.dashboard.useQuery(
     { weekId: selectedWeekId ?? 0, guard },
-    { enabled: Boolean(selectedWeekId && session?.role === "facilitator") }
+    {
+      enabled: Boolean(selectedWeekId && session?.role === "facilitator"),
+      refetchInterval: activeSection === "recepcion" ? 30_000 : false,
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: true,
+    }
   );
   const equipmentOptions = useMemo(
     () => [...(bootstrap.data?.equipment ?? [])].sort((a, b) => a.code.localeCompare(b.code)),
@@ -501,6 +506,40 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const [receptionObservations, setReceptionObservations] = useState<Record<string, string>>({});
+  const markReceptionReceivedMutation = trpc.maintenance.markReceptionReceived.useMutation({
+    onSuccess: async (_result, variables) => {
+      setReceptionObservations(current => {
+        const next = { ...current };
+        delete next[`${variables.workOrderId}:${variables.weekId}`];
+        return next;
+      });
+      await utils.maintenance.dashboard.invalidate({ weekId: variables.weekId, guard });
+      toast.success("Recepción marcada como RECIBIDO.");
+    },
+    onError: async error => {
+      if (error.data?.code === "CONFLICT") {
+        await dashboard.refetch();
+        toast.error("Otro facilitador modificó la recepción. Se actualizó el estado vigente.");
+        return;
+      }
+      toast.error(error.message);
+    },
+  });
+  const revertReceptionMutation = trpc.maintenance.revertReception.useMutation({
+    onSuccess: async (_result, variables) => {
+      await utils.maintenance.dashboard.invalidate({ weekId: variables.weekId, guard });
+      toast.success("Recepción cambiada a NO RECIBIDO.");
+    },
+    onError: async error => {
+      if (error.data?.code === "CONFLICT") {
+        await dashboard.refetch();
+        toast.error("Otro facilitador modificó la recepción. Se actualizó el estado vigente.");
+        return;
+      }
+      toast.error(error.message);
+    },
+  });
   const executionMutation = trpc.maintenance.markOperationalExecution.useMutation({
     onSuccess: result => {
       toast.success(
@@ -559,6 +598,14 @@ export default function Home() {
     );
   }, [operationalEquipment, equipmentSearch]);
   const rows = dashboard.data?.rows ?? [];
+  const receptionObservationKey = (workOrderId: number, weekId: number) => `${workOrderId}:${weekId}`;
+  const receptionRows = useMemo(
+    () => rows
+      .filter(row => hasReservation(row.workOrder.sourceData))
+      .slice()
+      .sort((a, b) => a.workOrder.otNumber.localeCompare(b.workOrder.otNumber, undefined, { numeric: true })),
+    [rows]
+  );
   const getPendingReentryRows = (equipmentId: number) => rows.filter(row =>
     row.equipment?.id === equipmentId && !isWorkOrderClosed(row.execution?.status)
   );
@@ -1137,6 +1184,7 @@ export default function Home() {
           <nav className="mt-3 space-y-1">
             {[
               { id: "panel", label: "Panel de control", icon: BarChart3 },
+              { id: "recepcion", label: "Recepción de repuestos", icon: PackageCheck },
               { id: "equipos", label: "Equipos del turno", icon: Truck },
               { id: "ot", label: "Plan semanal", icon: ClipboardCheck },
               { id: "historico", label: "Histórico de OT", icon: History },
@@ -1450,6 +1498,96 @@ export default function Home() {
                   </div>
                 </section>
                 </>}
+
+                {activeSection === "recepcion" && <section
+                  id="recepcion"
+                  className="mt-5 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-4 sm:p-6"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
+                        <PackageCheck className="h-3.5 w-3.5" /> Recepción de repuestos
+                      </div>
+                      <h2 className="mt-1 font-display text-2xl text-white">Confirmar recepción</h2>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">Estado compartido por OT y semana para las cuatro guardias. La lista se sincroniza periódicamente.</p>
+                    </div>
+                    <div className="text-xs text-slate-500">{receptionRows.length} OT con reserva</div>
+                  </div>
+
+                  {!selectedWeekId ? (
+                    <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">Selecciona una semana para consultar sus recepciones.</div>
+                  ) : dashboard.isLoading ? (
+                    <div className="mt-5 rounded-xl border border-white/[0.06] p-8 text-center text-sm text-slate-500">Cargando recepciones…</div>
+                  ) : dashboard.isError ? (
+                    <div className="mt-5 rounded-xl border border-rose-300/15 bg-rose-300/[0.04] p-5 text-center text-sm text-rose-200">
+                      No se pudieron cargar las recepciones.
+                      <button type="button" onClick={() => void dashboard.refetch()} className="ml-2 font-bold underline underline-offset-2">Reintentar</button>
+                    </div>
+                  ) : receptionRows.length ? (
+                    <div className="mt-5 grid gap-3">
+                      {receptionRows.map(row => {
+                        const reception = row.reception ?? { status: "NO_RECIBIDO" as const, observation: null, version: 0 };
+                        const isReceived = reception.status === "RECIBIDO";
+                        const mutationPending = markReceptionReceivedMutation.isPending || revertReceptionMutation.isPending;
+                        return (
+                          <article key={row.workOrder.id} className={`rounded-xl border p-4 transition ${isReceived ? "border-emerald-300/20 bg-emerald-300/[0.035]" : "border-white/[0.07] bg-white/[0.02]"}`}>
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
+                                  <span className="rounded-full border border-white/[0.08] px-2 py-0.5 text-[10px] text-slate-400">{row.equipment?.code ?? "Sin equipo"}</span>
+                                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-wide ${isReceived ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-300/25 bg-amber-300/10 text-amber-200"}`}>
+                                    {isReceived ? "RECIBIDO" : "NO RECIBIDO"}
+                                  </span>
+                                </div>
+                                <p className="mt-2 break-words text-xs leading-5 text-slate-400">{row.workOrder.description || "Sin descripción"}</p>
+                                {isReceived ? (
+                                  reception.observation && <div className="mt-3 rounded-lg border border-white/[0.06] bg-black/10 px-3 py-2 text-xs leading-5 text-slate-300"><span className="font-bold text-slate-500">Observación: </span>{reception.observation}</div>
+                                ) : (
+                                  <label className="mt-3 block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                                    Observación <span className="font-normal normal-case tracking-normal">(opcional)</span>
+                                    <textarea
+                                      value={receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)] ?? ""}
+                                      onChange={event => setReceptionObservations(current => ({ ...current, [receptionObservationKey(row.workOrder.id, selectedWeekId)]: event.target.value }))}
+                                      maxLength={10000}
+                                      rows={2}
+                                      placeholder="Añade una observación si hace falta"
+                                      className="mt-2 min-h-16 w-full resize-y rounded-lg border border-white/[0.08] bg-black/15 px-3 py-2 text-sm font-normal normal-case tracking-normal text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40"
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                              <div className="flex shrink-0 sm:pt-0.5">
+                                {isReceived ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => revertReceptionMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, expectedVersion: reception.version })}
+                                    disabled={mutationPending}
+                                    className="w-full rounded-lg border border-rose-300/25 bg-rose-300/[0.06] px-4 py-2.5 text-xs font-bold text-rose-200 transition hover:bg-rose-300/10 disabled:cursor-wait disabled:opacity-45 sm:w-auto"
+                                  >{revertReceptionMutation.isPending ? "ACTUALIZANDO…" : "CAMBIAR A NO RECIBIDO"}</button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => markReceptionReceivedMutation.mutate({
+                                      workOrderId: row.workOrder.id,
+                                      weekId: selectedWeekId,
+                                      expectedVersion: reception.version,
+                                      observation: receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)]?.trim() || undefined,
+                                    })}
+                                    disabled={mutationPending}
+                                    className="w-full rounded-lg bg-emerald-300 px-4 py-2.5 text-xs font-bold text-[#071014] transition hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-45 sm:w-auto"
+                                  >{markReceptionReceivedMutation.isPending ? "GUARDANDO…" : "MARCAR RECIBIDO"}</button>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay OT con reservas en esta semana.</div>
+                  )}
+                </section>}
 
                 {activeSection === "equipos" && <section
                   id="equipos"

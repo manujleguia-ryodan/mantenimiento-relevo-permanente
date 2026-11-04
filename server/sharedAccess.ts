@@ -39,10 +39,12 @@ export function createSharedAccessToken(
   expiresAt = Date.now() + SHARED_ACCESS_TTL_MS,
   role: SharedAccessRole = "admin",
   guard: SharedAccessGuard = "A",
-  name = "Acceso compartido"
+  name = "Acceso compartido",
+  accessCodeId: number | null = null
 ) {
   const encodedName = Buffer.from(name, "utf8").toString("base64url");
-  const payload = `${expiresAt}|${role}|${guard}|${encodedName}`;
+  const encodedAccessCodeId = Number.isSafeInteger(accessCodeId) && (accessCodeId ?? 0) > 0 ? String(accessCodeId) : "";
+  const payload = `${expiresAt}|${role}|${guard}|${encodedName}|${encodedAccessCodeId}`;
   return `${payload}.${signature(payload, secret)}`;
 }
 
@@ -122,6 +124,20 @@ export function getSharedAccessName(req: Pick<Request, "headers">) {
   } catch {
     return "Acceso compartido";
   }
+}
+
+export function getSharedAccessCodeId(req: Pick<Request, "headers">): number | null {
+  const rawCookieHeader = req.headers.cookie;
+  const cookieHeader = Array.isArray(rawCookieHeader)
+    ? rawCookieHeader.join(";")
+    : (rawCookieHeader ?? "");
+  const token = parseCookie(cookieHeader)[SHARED_ACCESS_COOKIE];
+  if (!verifySharedAccessToken(token, process.env.JWT_SECRET)) return null;
+  const payload = token!.slice(0, token!.lastIndexOf("."));
+  const value = payload.split("|")[4];
+  if (!value || !/^\d+$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 export type SharedAccessRole = "admin" | "facilitator" | "supervisor";
