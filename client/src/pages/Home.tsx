@@ -1705,15 +1705,13 @@ export default function Home() {
                                         </label>
                                         {row.workOrder.fotoRepuesto && <button type="button" title="Ver evidencia fotográfica" aria-label={`Ver evidencia de OT ${row.workOrder.otNumber}`} onClick={() => setPhotoPreview({ otNumber: row.workOrder.otNumber, src: row.workOrder.fotoRepuesto! })} className="overflow-hidden rounded-md border border-emerald-300/25 bg-black/20 p-0.5 transition hover:border-emerald-200"><img src={row.workOrder.fotoRepuesto} alt={`Evidencia fotográfica de OT ${row.workOrder.otNumber}`} className="h-8 w-8 object-cover" /></button>}
                                         {otCycleFilter !== "FINALIZADAS" && row.workOrder.fotoRepuesto && row.execution?.status !== "CERRADA_NOTIFICADA" && <button type="button" title="Eliminar evidencia fotográfica" aria-label={`Eliminar evidencia de OT ${row.workOrder.otNumber}`} onClick={() => savePhotoMutation.mutate({ workOrderId: row.workOrder.id, photoData: null })} disabled={savePhotoMutation.isPending} className="rounded-md p-1 text-rose-300 transition hover:bg-rose-300/10 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" /></button>}
-                                        <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-slate-500">{isCorrective ? "Correctiva" : "Programada"}</span>
                                         {requiresLogistics ? <StatusPill status={state} /> : <span className="text-[11px] text-slate-600">Sin reserva</span>}
                                         {row.execution?.status === "CERRADA_NOTIFICADA" && <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Finalizada</span>}
                                       </div>
-                                      <p className="mt-1 break-words text-xs leading-snug text-slate-300">{description}</p>
-                                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
-                                        <span>Reserva: <b className="text-slate-300">{getReservationValue(row.workOrder.sourceData) || "—"}</b></span>
-                                        <span>Responsable: <b className="text-slate-300">{row.state?.responsibleName || "Sin registrar"}</b></span>
-                                        {row.execution?.status === "CERRADA_NOTIFICADA" && <span>Cierre: <b className="text-blue-200">{row.execution.executedByName || "Operador"} · {formatDate(row.execution.executedAt)}</b></span>}
+                                      <div className="mt-2 grid gap-x-4 gap-y-1 text-[11px] text-slate-500 sm:grid-cols-2">
+                                        <span>Equipo: <b className="font-mono text-amber-200">{row.equipment?.code ?? "—"}</b></span>
+                                        <span>Reserva: <b className="text-slate-300">{getReservationValue(row.workOrder.sourceData) || "Sin reserva"}</b></span>
+                                        <span className="break-words sm:col-span-2">Trabajo: <b className="font-normal text-slate-300">{description}</b></span>
                                       </div>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2 xl:justify-end">
@@ -1850,8 +1848,7 @@ export default function Home() {
                               return <div key={row.workOrder.id} className="space-y-2 bg-[#11191a] p-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>{isFinalized ? <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Finalizada</span> : <StatusPill status={state} />}</div>
                                 <div className="grid gap-1 text-xs sm:grid-cols-2"><div><span className="text-slate-600">Equipo: </span><b className="text-amber-200">{row.equipment?.code ?? "—"}</b></div><div><span className="text-slate-600">Reserva: </span><span className="break-words text-slate-300">{reservation || "Sin reserva"}</span></div></div>
-                                <p className="break-words text-xs leading-relaxed text-slate-300"><span className="text-slate-600">Descripción: </span>{description}</p>
-                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500"><span>Recepción: <b className="text-slate-300">{row.state?.responsibleName || "Sin registrar"}</b></span>{isFinalized && <span>Cierre: <b className="text-blue-200">{row.execution?.executedByName || "Usuario"}</b></span>}</div>
+                                <p className="break-words text-xs leading-relaxed text-slate-300"><span className="text-slate-600">Trabajo: </span>{description}</p>
                               </div>;
                             })}
                           </div>
