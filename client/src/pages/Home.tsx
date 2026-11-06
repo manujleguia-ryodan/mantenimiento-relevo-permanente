@@ -367,7 +367,7 @@ export default function Home() {
     { weekId: selectedWeekId ?? 0, guard },
     {
       enabled: Boolean(selectedWeekId && session?.role === "facilitator"),
-      refetchInterval: activeSection === "recepcion" ? 30_000 : false,
+      refetchInterval: activeSection === "equipos" ? 30_000 : false,
       refetchIntervalInBackground: false,
       refetchOnWindowFocus: true,
     }
@@ -599,13 +599,6 @@ export default function Home() {
   }, [operationalEquipment, equipmentSearch]);
   const rows = dashboard.data?.rows ?? [];
   const receptionObservationKey = (workOrderId: number, weekId: number) => `${workOrderId}:${weekId}`;
-  const receptionRows = useMemo(
-    () => rows
-      .filter(row => hasReservation(row.workOrder.sourceData))
-      .slice()
-      .sort((a, b) => a.workOrder.otNumber.localeCompare(b.workOrder.otNumber, undefined, { numeric: true })),
-    [rows]
-  );
   const getPendingReentryRows = (equipmentId: number) => rows.filter(row =>
     row.equipment?.id === equipmentId && !isWorkOrderClosed(row.execution?.status)
   );
@@ -1184,7 +1177,6 @@ export default function Home() {
           <nav className="mt-3 space-y-1">
             {[
               { id: "panel", label: "Panel de control", icon: BarChart3 },
-              { id: "recepcion", label: "Recepción de repuestos", icon: PackageCheck },
               { id: "equipos", label: "Equipos del turno", icon: Truck },
               { id: "ot", label: "Plan semanal", icon: ClipboardCheck },
               { id: "historico", label: "Histórico de OT", icon: History },
@@ -1386,67 +1378,7 @@ export default function Home() {
                     onClick={() => scrollTo("ot")}
                   />
                 </section>
-                <section className="mt-6 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-                  <div className="rounded-2xl border border-white/[0.07] bg-[#101718] p-5">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                          Distribución actual
-                        </div>
-                        <h2 className="mt-1 font-display text-2xl text-white">
-                          Estado de recepción
-                        </h2>
-                      </div>
-                      <div className="rounded-xl bg-white/[0.04] p-2 text-slate-400">
-                        <BarChart3 className="h-4 w-4" />
-                      </div>
-                    </div>
-                    <div className="mt-5 flex flex-col items-center gap-6 sm:flex-row">
-                      <div
-                        className="relative grid h-36 w-36 shrink-0 place-items-center rounded-full"
-                        style={{
-                          background: `conic-gradient(#34d399 0 ${kpis.total ? (kpis.received / kpis.total) * 100 : 0}%, #fbbf24 0 ${kpis.total ? ((kpis.received + kpis.partial) / kpis.total) * 100 : 0}%, #fb7185 0 100%)`,
-                        }}
-                      >
-                        <div className="grid h-24 w-24 place-items-center rounded-full bg-[#101718]">
-                          <div className="text-center">
-                            <div className="font-display text-2xl text-white">
-                              {kpis.percent}%
-                            </div>
-                            <div className="text-[9px] uppercase tracking-wider text-slate-500">
-                              completa
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="w-full space-y-3">
-                        {(
-                          ["RECIBIDA", "PARCIAL", "FALTA_RECIBIR", "REVISADO"] as Status[]
-                        ).map(status => (
-                          <div
-                            key={status}
-                            className="flex items-center justify-between text-sm"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`h-2 w-2 rounded-full ${STATUS_META[status].dot}`}
-                              />
-                              <span className="text-slate-400">
-                                {STATUS_META[status].label}
-                              </span>
-                            </div>
-                            <span className="font-mono font-semibold text-white">
-                              {status === "RECIBIDA"
-                                ? kpis.received
-                                : status === "PARCIAL"
-                                  ? kpis.partial
-                                  : kpis.missing}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                <section className="mt-6">
                   <div className="rounded-2xl border border-white/[0.07] bg-[#101718] p-5">
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
                       Concentración de pendientes
@@ -1498,96 +1430,6 @@ export default function Home() {
                   </div>
                 </section>
                 </>}
-
-                {activeSection === "recepcion" && <section
-                  id="recepcion"
-                  className="mt-5 scroll-mt-24 rounded-2xl border border-white/[0.07] bg-[#101718] p-4 sm:p-6"
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
-                        <PackageCheck className="h-3.5 w-3.5" /> Recepción de repuestos
-                      </div>
-                      <h2 className="mt-1 font-display text-2xl text-white">Confirmar recepción</h2>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">Estado compartido por OT y semana para las cuatro guardias. La lista se sincroniza periódicamente.</p>
-                    </div>
-                    <div className="text-xs text-slate-500">{receptionRows.length} OT con reserva</div>
-                  </div>
-
-                  {!selectedWeekId ? (
-                    <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">Selecciona una semana para consultar sus recepciones.</div>
-                  ) : dashboard.isLoading ? (
-                    <div className="mt-5 rounded-xl border border-white/[0.06] p-8 text-center text-sm text-slate-500">Cargando recepciones…</div>
-                  ) : dashboard.isError ? (
-                    <div className="mt-5 rounded-xl border border-rose-300/15 bg-rose-300/[0.04] p-5 text-center text-sm text-rose-200">
-                      No se pudieron cargar las recepciones.
-                      <button type="button" onClick={() => void dashboard.refetch()} className="ml-2 font-bold underline underline-offset-2">Reintentar</button>
-                    </div>
-                  ) : receptionRows.length ? (
-                    <div className="mt-5 grid gap-3">
-                      {receptionRows.map(row => {
-                        const reception = row.reception ?? { status: "NO_RECIBIDO" as const, observation: null, version: 0 };
-                        const isReceived = reception.status === "RECIBIDO";
-                        const mutationPending = markReceptionReceivedMutation.isPending || revertReceptionMutation.isPending;
-                        return (
-                          <article key={row.workOrder.id} className={`rounded-xl border p-4 transition ${isReceived ? "border-emerald-300/20 bg-emerald-300/[0.035]" : "border-white/[0.07] bg-white/[0.02]"}`}>
-                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>
-                                  <span className="rounded-full border border-white/[0.08] px-2 py-0.5 text-[10px] text-slate-400">{row.equipment?.code ?? "Sin equipo"}</span>
-                                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold tracking-wide ${isReceived ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-300/25 bg-amber-300/10 text-amber-200"}`}>
-                                    {isReceived ? "RECIBIDO" : "NO RECIBIDO"}
-                                  </span>
-                                </div>
-                                <p className="mt-2 break-words text-xs leading-5 text-slate-400">{row.workOrder.description || "Sin descripción"}</p>
-                                {isReceived ? (
-                                  reception.observation && <div className="mt-3 rounded-lg border border-white/[0.06] bg-black/10 px-3 py-2 text-xs leading-5 text-slate-300"><span className="font-bold text-slate-500">Observación: </span>{reception.observation}</div>
-                                ) : (
-                                  <label className="mt-3 block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
-                                    Observación <span className="font-normal normal-case tracking-normal">(opcional)</span>
-                                    <textarea
-                                      value={receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)] ?? ""}
-                                      onChange={event => setReceptionObservations(current => ({ ...current, [receptionObservationKey(row.workOrder.id, selectedWeekId)]: event.target.value }))}
-                                      maxLength={10000}
-                                      rows={2}
-                                      placeholder="Añade una observación si hace falta"
-                                      className="mt-2 min-h-16 w-full resize-y rounded-lg border border-white/[0.08] bg-black/15 px-3 py-2 text-sm font-normal normal-case tracking-normal text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40"
-                                    />
-                                  </label>
-                                )}
-                              </div>
-                              <div className="flex shrink-0 sm:pt-0.5">
-                                {isReceived ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => revertReceptionMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, expectedVersion: reception.version })}
-                                    disabled={mutationPending}
-                                    className="w-full rounded-lg border border-rose-300/25 bg-rose-300/[0.06] px-4 py-2.5 text-xs font-bold text-rose-200 transition hover:bg-rose-300/10 disabled:cursor-wait disabled:opacity-45 sm:w-auto"
-                                  >{revertReceptionMutation.isPending ? "ACTUALIZANDO…" : "CAMBIAR A NO RECIBIDO"}</button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => markReceptionReceivedMutation.mutate({
-                                      workOrderId: row.workOrder.id,
-                                      weekId: selectedWeekId,
-                                      expectedVersion: reception.version,
-                                      observation: receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)]?.trim() || undefined,
-                                    })}
-                                    disabled={mutationPending}
-                                    className="w-full rounded-lg bg-emerald-300 px-4 py-2.5 text-xs font-bold text-[#071014] transition hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-45 sm:w-auto"
-                                  >{markReceptionReceivedMutation.isPending ? "GUARDANDO…" : "MARCAR RECIBIDO"}</button>
-                                )}
-                              </div>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">No hay OT con reservas en esta semana.</div>
-                  )}
-                </section>}
 
                 {activeSection === "equipos" && <section
                   id="equipos"
@@ -1692,6 +1534,9 @@ export default function Home() {
                               const description = row.workOrder.description || fields["Descripción de operación"] || fields.Descripcion || "Sin descripción";
                               const isFinalized = row.execution?.status === "CERRADA_NOTIFICADA";
                               const receptionAction = getReceptionAction(state);
+                              const reception = row.reception ?? { status: "NO_RECIBIDO" as const, observation: null, version: 0 };
+                              const isReceived = reception.status === "RECIBIDO";
+                              const receptionMutationPending = markReceptionReceivedMutation.isPending || revertReceptionMutation.isPending;
                               return (
                                 <div key={row.workOrder.id} className={`border-l-4 p-3 ${statusRowTone(state, isFinalized)}`}>
                                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -1714,6 +1559,18 @@ export default function Home() {
                                         <span className="break-words sm:col-span-2">Trabajo: <b className="font-normal text-slate-300">{description}</b></span>
                                       </div>
                                     </div>
+                                    {requiresLogistics && selectedWeekId && <div className="mt-3 rounded-lg border border-white/[0.07] bg-black/10 p-2.5 xl:mt-0 xl:w-64">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${isReceived ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-300/25 bg-amber-300/10 text-amber-200"}`}>{isReceived ? "RECIBIDO" : "NO RECIBIDO"}</span>
+                                        {isReceived && <button type="button" onClick={() => revertReceptionMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, expectedVersion: reception.version })} disabled={receptionMutationPending} className="text-[10px] font-bold text-rose-200 underline underline-offset-2 disabled:opacity-45">{revertReceptionMutation.isPending ? "ACTUALIZANDO…" : "CAMBIAR A NO RECIBIDO"}</button>}
+                                      </div>
+                                      {isReceived ? (
+                                        reception.observation && <p className="mt-2 break-words text-[10px] leading-4 text-slate-400"><span className="font-bold text-slate-500">Obs.: </span>{reception.observation}</p>
+                                      ) : <>
+                                        <textarea value={receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)] ?? ""} onChange={event => setReceptionObservations(current => ({ ...current, [receptionObservationKey(row.workOrder.id, selectedWeekId)]: event.target.value }))} maxLength={10000} rows={2} placeholder="Observación opcional" className="mt-2 min-h-12 w-full resize-y rounded-md border border-white/[0.08] bg-black/15 px-2 py-1.5 text-[11px] text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40" />
+                                        <button type="button" onClick={() => markReceptionReceivedMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, expectedVersion: reception.version, observation: receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)]?.trim() || undefined })} disabled={receptionMutationPending} className="mt-2 w-full rounded-md bg-emerald-300 px-2.5 py-2 text-[10px] font-bold text-[#071014] disabled:opacity-45">{markReceptionReceivedMutation.isPending ? "GUARDANDO…" : "MARCAR RECIBIDO"}</button>
+                                      </>}
+                                    </div>}
                                     <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                                       {otCycleFilter === "FINALIZADAS" && <button type="button" onClick={() => { setEditingRow(row); setHistoryOnly(true); setShowHistory(true); }} className="rounded-lg border border-blue-300/25 px-3 py-2 text-[11px] font-bold text-blue-200 transition hover:bg-blue-300/10"><History className="mr-1 inline h-3.5 w-3.5" />Historial</button>}
                                       {otCycleFilter !== "FINALIZADAS" && <>
@@ -1844,11 +1701,27 @@ export default function Home() {
                               const fields = getImportedFields(row.workOrder.sourceData);
                               const description = row.workOrder.description || fields["Descripción de operación"] || fields.Descripcion || "Sin descripción";
                               const reservation = getReservationValue(row.workOrder.sourceData);
+                              const requiresLogistics = row.requiresLogistics ?? hasReservation(row.workOrder.sourceData);
                               const isFinalized = row.execution?.status === "CERRADA_NOTIFICADA";
+                              const reception = row.reception ?? { status: "NO_RECIBIDO" as const, observation: null, version: 0 };
+                              const isReceived = reception.status === "RECIBIDO";
+                              const receptionMutationPending = markReceptionReceivedMutation.isPending || revertReceptionMutation.isPending;
                               return <div key={row.workOrder.id} className="space-y-2 bg-[#11191a] p-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-sm font-bold text-white">OT {row.workOrder.otNumber}</span>{isFinalized ? <span className="rounded-md border border-blue-300/20 bg-blue-300/10 px-2 py-1 text-[10px] font-bold text-blue-200">Finalizada</span> : <StatusPill status={state} />}</div>
                                 <div className="grid gap-1 text-xs sm:grid-cols-2"><div><span className="text-slate-600">Equipo: </span><b className="text-amber-200">{row.equipment?.code ?? "—"}</b></div><div><span className="text-slate-600">Reserva: </span><span className="break-words text-slate-300">{reservation || "Sin reserva"}</span></div></div>
                                 <p className="break-words text-xs leading-relaxed text-slate-300"><span className="text-slate-600">Trabajo: </span>{description}</p>
+                                {requiresLogistics && selectedWeekId && <div className="rounded-lg border border-white/[0.07] bg-black/10 p-2.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${isReceived ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-300/25 bg-amber-300/10 text-amber-200"}`}>{isReceived ? "RECIBIDO" : "NO RECIBIDO"}</span>
+                                    {isReceived && <button type="button" onClick={() => revertReceptionMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, expectedVersion: reception.version })} disabled={receptionMutationPending} className="text-[10px] font-bold text-rose-200 underline underline-offset-2 disabled:opacity-45">CAMBIAR A NO RECIBIDO</button>}
+                                  </div>
+                                  {isReceived ? (
+                                    reception.observation && <p className="mt-2 break-words text-[10px] leading-4 text-slate-400"><span className="font-bold text-slate-500">Obs.: </span>{reception.observation}</p>
+                                  ) : <>
+                                    <textarea value={receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)] ?? ""} onChange={event => setReceptionObservations(current => ({ ...current, [receptionObservationKey(row.workOrder.id, selectedWeekId)]: event.target.value }))} maxLength={10000} rows={2} placeholder="Observación opcional" className="mt-2 min-h-12 w-full resize-y rounded-md border border-white/[0.08] bg-black/15 px-2 py-1.5 text-[11px] text-white outline-none placeholder:text-slate-600 focus:border-amber-300/40" />
+                                    <button type="button" onClick={() => markReceptionReceivedMutation.mutate({ workOrderId: row.workOrder.id, weekId: selectedWeekId, expectedVersion: reception.version, observation: receptionObservations[receptionObservationKey(row.workOrder.id, selectedWeekId)]?.trim() || undefined })} disabled={receptionMutationPending} className="mt-2 w-full rounded-md bg-emerald-300 px-2.5 py-2 text-[10px] font-bold text-[#071014] disabled:opacity-45">{markReceptionReceivedMutation.isPending ? "GUARDANDO…" : "MARCAR RECIBIDO"}</button>
+                                  </>}
+                                </div>}
                               </div>;
                             })}
                           </div>
